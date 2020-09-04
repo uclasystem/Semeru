@@ -1,0 +1,5 @@
+config TESTCASE
+	tristate "Self defined kernel module tset case"
+	depends on INFINIBAND
+	---help---
+	  Self defined external module.
