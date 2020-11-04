@@ -2,6 +2,22 @@
 
 
 
+###
+# Macro define
+
+# The swap file/partition size should be equal to the whole size of remote memory
+SWAP_PARTITION_SIZE="32G"
+
+# Cause of sudo, NOT use ${HOME}
+home_dir="/mnt/ssd/wcx"
+semeru_module_dir="${home_dir}/Semeru/linux-4.11-rc8/semeru"
+swap_file="${home_dir}/swapfile" 
+
+
+
+##
+# Do the action
+
 action=$1
 
 if [ -z "${action}" ]
@@ -12,34 +28,25 @@ then
 	echo "Pleaes slect what to do:"
 	echo "semeru : Prepare the semeru memory pool to run."
 	echo "	1.1 close current Swap partition"
-	echo "	1.2 load_semeru"
-	echo "	1.3 mount_semeru"
-	echo "load_semeru : load semeru module for Disk Driver DEBUG"
-	echo "	2.1 close current Swap Partition."
-	echo "	2.2 Instll semeru to manage the old swap partition.	"
-	echo "mount_semeru : Format & Mount the remote memory partition"	
+	echo "	1.2 create swapfile as fake swap device"
+	echo "	1.3 install semeru"
+  echo "create_swap_file : Creat a swapfile under ${swap_file} with size ${SWAP_PARTITION_SIZE}"
+	echo "load_semeru : load semeru module"
+	echo "	2.1 Instll semeru for the frontswap path.	"
 	echo "close_semeru : Close the remote memory partition && Remove the Semeru module "	
 	
 	read action 
 
 fi
 
-
-
-if [ -z "${HOME}"  ]
+if [ -z "${home_dir}"  ]
 then 
-	echo " Warning :HOME is null. Set it correctly."
-  exit 
+	echo " Warning : home_dir is null."
 fi
-
-## Macros 
-HOME="/mnt/ssd/semeru"
-semeru_dir="${HOME}/Semeru/linux-4.11-rc8/semeru"
-
 
 ## self defined function
 
-close_swap_partition () {
+function close_swap_partition () {
 
   echo "Close current Swap Partition"
   swap_bd=$(swapon -s | grep "dev" | cut -d " " -f 1 )
@@ -58,6 +65,43 @@ close_swap_partition () {
 }
 
 
+
+function create_swap_file () {
+
+  if [ -e ${swap_file} ]
+  then
+    echo "Please confirm the size of swapfile match the expected ${SWAP_PARTITION_SIZE}" 
+    cur_size=$(du -sh ${swap_file} | awk '{print $1;}' ) 
+    if [ "${cur_size}"  != "${SWAP_PARTITION_SIZE}" ]
+    then
+      echo "Current ${swap_file} : ${cur_size} NOT equal to expected ${SWAP_PARTITION_SIZE}"    
+      echo "Delete it"
+      sudo rm ${swap_file}
+      
+      echo "Create a file, ~/swapfile, with size ${SWAP_PARTITION_SIZE} as swap device."
+      sudo fallocate -l ${SWAP_PARTITION_SIZE} ${swap_file} 
+      sudo chmod 600 ${swap_file}
+    fi
+  else 
+    # not exit, create a swapfile
+    echo "Create a file, ~/swapfile, with size ${SWAP_PARTITION_SIZE} as swap device."
+    sudo fallocate -l ${SWAP_PARTITION_SIZE} ${swap_file} 
+    sudo chmod 600 ${swap_file}
+    du -sh ${swap_file}
+  fi
+
+  sleep 1
+  echo "Mount the ${swap_file} as swap device"
+  sudo mkswap ${swap_file}
+  sudo swapon ${swap_file}
+
+  # check
+  swapon -s
+}
+
+
+
+
 if [ "${action}" = "semeru"  ]
 then
 	# Prepare the semeru module to run
@@ -66,38 +110,23 @@ then
 	echo "Close current swap partition"
 	close_swap_partition
 
+  # 2. Create a swapfile and mount it as swap device 
+  create_swap_file
+
 	# 2. load semeru module 
-	echo "insmod ~/linux-4.11-rc8/semeru/semeru_cpu.ko"
-	sudo insmod ${semeru_dir}/semeru_cpu.ko
+	echo "insmod ~/linux-4.11-rc8/semeru/semeru_cpu_server.ko"
+	sudo insmod ${semeru_module_dir}/semeru_cpu_server.ko
 
-	# 3. Mount Semeru memory pool as Swap partition
-	echo "Format & Mount semeru(rmempool) as Swap parititon"
-	sudo mkswap /dev/rmempool
-	sudo swapon /dev/rmempool
-
-	# 4. check Swap partition
-	swapon -s
+elif [ "${action}" = "create_swap_file" ]
+then
+ create_swap_file 
 
 elif [ "${action}" = "load_semeru"  ]
 then
-	# 1
-	close_swap_partition
 
-	# 2, mound semeru
-	echo "insmod ~/linux-4.11-rc8/semeru/semeru_cpu.ko"
-	sudo insmod ${semeru_dir}/semeru_cpu.ko
-
-	# 3, check
-	lsblk
-elif  [ "${action}" = "mount_semeru"  ]
-then
-	echo "Format rmempool to swap parititon"
-	sudo mkswap /dev/rmempool
-
-	echo "Mount /de/rmempool as swap partition"
-	sudo swapon /dev/rmempool
-
-	swapon -s
+	# 1, mound semeru
+	echo "insmod ~/linux-4.11-rc8/semeru/semeru_cpu_server.ko"
+	sudo insmod ${semeru_module_dir}/semeru_cpu_server.ko
 
 elif [	"${action}" = "close_semeru"	]
 then
@@ -106,8 +135,8 @@ then
 	close_swap_partition
 
 	#2 remove the semeru moduels
-	echo "Remove the semeru_cpu modeule"
-	sudo rmmod ${semeru_dir}/semeru_cpu.ko
+	echo "Remove the semeru_cpu_server modeule"
+	sudo rmmod ${semeru_module_dir}/semeru_cpu_server.ko
 
 else
 	echo "!! Wrong choice : ${action}"

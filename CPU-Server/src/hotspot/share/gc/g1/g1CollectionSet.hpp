@@ -201,7 +201,7 @@ public:
   //mhr: modify
   //mhr: new
   void finalize_parts(G1SurvivorRegions* survivors);
-  void finalize_parts_with_ratio(G1SurvivorRegions* survivors);
+  //void finalize_parts_with_ratio(G1SurvivorRegions* survivors);
 
   // Add old region "hr" to the collection set.
   void add_old_region(HeapRegion* hr);

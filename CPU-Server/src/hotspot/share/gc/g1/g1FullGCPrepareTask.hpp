@@ -75,6 +75,7 @@ protected:
 
   public:
     G1PrepareCompactLiveClosure(G1FullGCCompactionPoint* cp);
+    void set_containing_obj(oop obj){}
     size_t apply(oop object);
   };
 
@@ -87,6 +88,8 @@ protected:
                        HeapRegion* hr) :
         _cp(hrcp),
         _current(hr) { }
+
+    void set_containing_obj(oop obj){}
 
     size_t apply(oop object);
   };

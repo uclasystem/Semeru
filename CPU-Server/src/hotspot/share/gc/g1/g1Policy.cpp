@@ -1168,12 +1168,25 @@ uint G1Policy::calc_max_cserver_cset_length() {
   return MAX_CSERVER_CSET_LENGTH;
 }
 
-uint G1Policy::cache_threshold_in_pages() const {
-  size_t page_size_bytes = 4 * 1024;
-  size_t min_cache_percent = 75;
-  size_t result = HeapRegion::GrainBytes/page_size_bytes*min_cache_percent/100; //98304 pages  swapped out 32768 pages
+/**
+ * Let CSSC process the regions when its cache ratio higher than cssc_cache_threshold_in_pages()
+ *  
+ */
+uint G1Policy::cssc_cache_threshold_in_pages() const {
+  size_t min_cache_percent = 75;   // 75%
+  size_t result = HeapRegion::GrainBytes/PAGE_SIZE*min_cache_percent/100; //98304 pages  swapped out 32768 pages
   return result;
 }
+
+/**
+ * MSCT only tracing regions when its cache ratio lower than  msct_cache_threshold_in_pages() 
+ */
+uint G1Policy::msct_cache_threshold_in_pages() const {
+  size_t max_cache_percent = 25;   // 25%
+  size_t result = HeapRegion::GrainBytes/PAGE_SIZE*max_cache_percent/100;
+  return result;
+}
+
 
 uint G1Policy::garbage_threshold_in_bytes() const {
   return HeapRegion::GrainBytes * (size_t) G1MixedGCLiveThresholdPercent / 100;

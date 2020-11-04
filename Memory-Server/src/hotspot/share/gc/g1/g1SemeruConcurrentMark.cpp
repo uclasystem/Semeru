@@ -458,7 +458,7 @@ SemeruHeapRegion* G1SemeruCMCSetRegions::claim_freshly_evicted_next() {
 		claimed_region = _freshly_evicted_regions[claimed_index%_max_regions];
 		if(claimed_region->write_check_tag_dirty()){
 			// Path#1 dirty_tag = 1, skip this region.
-			log_debug(semeru,rdma)("%s, Region[0x%x] is under transferring (tag 0x%x), skip it(add it back to CSet.).", 
+			log_debug(semeru,rdma)("%s, Region[%d] is under transferring (tag 0x%x), skip it(add it back to CSet.).", 
 																		__func__, claimed_region->hrm_index(),  claimed_region->_version_tag );
 			add_freshly_evicted_regions(claimed_region);	// add this region back.
 			// return null directly.
@@ -467,7 +467,7 @@ SemeruHeapRegion* G1SemeruCMCSetRegions::claim_freshly_evicted_next() {
 			// Path#2, claimed a Region successfully
 			claimed_region->store_write_verion_tag(); // store current version_tag
 
-			log_debug(semeru,mem_trace)("%s, claimed Region[0x%x], _claimed_freshly_evicted_regions 0x%lx, _num_freshly_evicted_regions 0x%lx", __func__,
+			log_debug(semeru,mem_trace)("%s, claimed Region[%d], _claimed_freshly_evicted_regions 0x%lx, _num_freshly_evicted_regions 0x%lx", __func__,
 																								claimed_region->hrm_index(), _claimed_freshly_evicted_regions, _num_freshly_evicted_regions);
 
 			return claimed_region;
@@ -1542,7 +1542,6 @@ void G1SemeruConcurrentMark::mark_from_roots() {
  */ 
 void G1SemeruConcurrentMark::semeru_concurrent_marking() {
 
-	//debug
 	log_debug(semeru, mem_trace)("%s, Runnting Thread, %s, gc_id %u ,  0x%lx \n", __func__, 
 																									((G1SemeruConcurrentMarkThread*)Thread::current())->name(),
 																									((G1SemeruConcurrentMarkThread*)Thread::current())->gc_id(),
@@ -3171,7 +3170,7 @@ void G1SemeruCMTask::move_entries_to_global_stack() {
 	G1SemeruTaskQueueEntry task_entry;
 	while (n < G1SemeruCMMarkStack::EntriesPerChunk && _semeru_task_queue->pop_local(task_entry)) {
 		buffer[n] = task_entry;		// Assign the poped entry to the newly created buffer[].
-		assert(_curr_region->is_in_reserved(task_entry.holder_addr()), "All the entries of one Chunk should belong to same Region[0x%x]", _curr_region->hrm_index() );
+		assert(_curr_region->is_in_reserved(task_entry.holder_addr()), "All the entries of one Chunk should belong to same Region[%d]", _curr_region->hrm_index() );
 		++n;
 	}
 
@@ -3569,7 +3568,7 @@ void G1SemeruCMTask::restore_region_mark_stats() {
 	alive_ratio = ((double)alive_words)/((double)SemeruHeapRegion::SemeruGrainWords); 
 	if(alive_ratio > ratio_before_update && _curr_region->scan_failure == false ){ 
 		_curr_region->set_alive_ratio(alive_ratio);
-		log_info(semeru,mem_trace)("%s, wroker[0x%x] update Region[0x%x] alive_ratio from %f to %f", 
+		log_info(semeru,mem_trace)("%s, wroker[0x%x] update Region[%d] alive_ratio from %f to %f", 
 																		__func__, worker_id(), region_index, ratio_before_update, _curr_region->alive_ratio() );
 	}
 
@@ -3578,7 +3577,7 @@ void G1SemeruCMTask::restore_region_mark_stats() {
 	// [?] This may cause some performance overhead ?
 	if(_curr_region->scan_failure){
 		_curr_region->set_alive_ratio(1.0);
-		log_info(semeru,mem_trace)("%s, wroker[0x%x] scan Region[0x%x] falied. Update alive_ratio to 1.0", __func__, worker_id(), region_index);
+		log_info(semeru,mem_trace)("%s, wroker[0x%x] scan Region[%d] falied. Update alive_ratio to 1.0", __func__, worker_id(), region_index);
 	}
 
 }
@@ -3891,7 +3890,7 @@ void G1SemeruCMTask::do_semeru_marking_step(double time_target_ms,
 				// reset the value on bitmap after scaning.
 				target_oop_bitmap_ptr->clear();
 				if(_curr_region->scan_failure){
-					log_debug(semeru,mem_trace)("%s, concurrent tracing for Region[0x%x] failed. skip it.\n",__func__, _curr_region->hrm_index());
+					log_debug(semeru,mem_trace)("%s, concurrent tracing for Region[%d] failed. skip it.\n",__func__, _curr_region->hrm_index());
 					// Clear the object already pushed into task_queue and stack
 					fault_tolerance_drain_local_queue(); 	// drain the local task_queue
 					falut_tolerance_drain_global_stack();
@@ -3905,7 +3904,7 @@ void G1SemeruCMTask::do_semeru_marking_step(double time_target_ms,
 			// The purpose is to limit the tracing memory footprint to reduce the CM conflict with mutators.
 			// if already aborted, leave the enqueued items to the rest procedures.
 
-			log_debug(semeru,mem_trace)("%s, worker[0x%x]  Drain reference queue for Region[0x%x]",__func__, worker_id(), _curr_region->hrm_index() );
+			log_debug(semeru,mem_trace)("%s, worker[0x%x]  Drain reference queue for Region[%d]",__func__, worker_id(), _curr_region->hrm_index() );
 			drain_local_queue(false);		// Current G1SemeruCMTask->_semeru_task_queue
 			drain_global_stack(false);  // Get a Chunk from global/overflow _global_mark_stack, ONLY process objects pushed by this G1SemeruCMTask.
 
@@ -3921,7 +3920,7 @@ void G1SemeruCMTask::do_semeru_marking_step(double time_target_ms,
 			// if(_curr_region->is_override_during_tracing() ){
 			// 	// Abandon current concurrent tracing and add it back to Freshly Evicted region CSet.
 			// 	// But the keep the garbage ratio.
-			// 	log_debug(semeru,mem_trace)("%s, worker[0x%x] abandon current tracing for Region[0x%x], it's written during tracing.", __func__,
+			// 	log_debug(semeru,mem_trace)("%s, worker[0x%x] abandon current tracing for Region[%d], it's written during tracing.", __func__,
 			// 																																													worker_id(), _curr_region->hrm_index() );
 				
 			// 	// [Fix Me] The add procedure is NOT MT safe !!!
@@ -3984,7 +3983,7 @@ void G1SemeruCMTask::do_semeru_marking_step(double time_target_ms,
 
 
 				assert(_curr_region == claimed_region, "invariant");
-				log_info(semeru,mem_trace)("%s, worker[0x%x]  get Region[0x%x] to scan. \n",__func__, worker_id(), claimed_region->hrm_index() );
+				log_info(semeru,mem_trace)("%s, worker[0x%x]  get Region[%d] to scan. \n",__func__, worker_id(), claimed_region->hrm_index() );
 
 				break; // break out of while loop.
 			}
@@ -4097,7 +4096,7 @@ out_tracing:
 		if(_curr_region != NULL && _curr_region->is_override_during_tracing() ){
 			// Abandon current concurrent tracing and add it back to Freshly Evicted region CSet.
 			// But the keep the garbage ratio.
-			log_debug(semeru,mem_trace)("%s, worker[0x%x] abandon current tracing for Region[0x%x], it's written during tracing.", __func__,
+			log_debug(semeru,mem_trace)("%s, worker[0x%x] abandon current tracing for Region[%d], it's written during tracing.", __func__,
 																																																worker_id(), _curr_region->hrm_index() );
 			_curr_region->reset_region_cm_scanned(); // Clear the scanned bit.
 			_semeru_cm->mem_server_cset()->add_freshly_evicted_regions(_curr_region);

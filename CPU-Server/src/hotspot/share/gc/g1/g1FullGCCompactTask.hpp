@@ -54,6 +54,7 @@ public:
 
   public:
     G1CompactRegionClosure(G1CMBitMap* bitmap) : _bitmap(bitmap) { }
+    void set_containing_obj(oop obj) {}
     size_t apply(oop object);
   };
 };

@@ -6,7 +6,7 @@
  */
 
 
-#include "semeru_cpu.h"
+#include "block_path.h"
 
 
 #define LOGICAL_BLOCK_SIZE 512

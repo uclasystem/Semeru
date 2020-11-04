@@ -61,7 +61,7 @@ unsigned long swp_entry_to_virtual_remapping[SWAP_ARRAY_LENGTH];
 // Record the swap out ratio for the JVM Heap Region
 // 1) Reset it to 0 before using by a process.
 // 2) Can only be used by one process at one time. 
-u32 jvm_region_swap_out_counter[SWAP_OUT_MONITOR_ARRAY_LEN];
+atomic_t jvm_region_swap_out_counter[SWAP_OUT_MONITOR_ARRAY_LEN];
 
 atomic_t on_demand_swapin_number;
 atomic_t hit_on_swap_cache_number;
@@ -150,7 +150,10 @@ void insert_swp_entry( struct page *page  , unsigned long virt_addr  ){
 	swp_entry_t entry = { .val = page_private(page) };
 	// Change the swp_offset to the full value.
 	// swp_offset is not arch specific
-	swp_entry_to_virtual_remapping[swp_offset(entry)] = ( (virt_addr -  RDMA_DATA_SPACE_START_ADDR) >> PAGE_SHIFT );
+	//swp_entry_to_virtual_remapping[swp_offset(entry)] = ( (virt_addr -  RDMA_DATA_SPACE_START_ADDR) >> PAGE_SHIFT );
+
+	// enable the swap-out of Meta Region
+	swp_entry_to_virtual_remapping[swp_offset(entry)] = ( (virt_addr -  SEMERU_START_ADDR) >> PAGE_SHIFT );
 
 	#ifdef DEBUG_SWAP_PATH
 			printk("%s,Build Remap from swp_entry_t[0x%llx] (type: 0x%llx, offset: 0x%llx) to virt_addr 0x%llx pages\n", 
@@ -164,6 +167,12 @@ void insert_swp_entry( struct page *page  , unsigned long virt_addr  ){
 // 	return swp_entry_to_virtual_remapping[swp_offset(entry)];
 // }
 
+
+// To be used by kernel module.
+unsigned long retrieve_swap_remmaping_virt_addr_via_offset(pgoff_t offset){
+	return swp_entry_to_virtual_remapping[offset];
+}
+EXPORT_SYMBOL(retrieve_swap_remmaping_virt_addr_via_offset);
 
 
 
@@ -210,16 +219,31 @@ bool within_range(u64 val){
 	
 	// 1) normal swap, for swp_entry_t --> virtual remap
 	//    Only data Region can be swapped out.
-	if( val >= (u64)RDMA_DATA_SPACE_START_ADDR && val < (u64)(RDMA_DATA_SPACE_START_ADDR + (size_t)MAX_SWAP_MEM_GB*ONE_GB )  ){
+	//if( val >= (u64)RDMA_DATA_SPACE_START_ADDR && val < (u64)(RDMA_DATA_SPACE_START_ADDR + (size_t)MAX_SWAP_MEM_GB*ONE_GB )  ){
+	//	return 1;
+	//}
+
+
+
+	// Enable the swap-out of Meta Region.
+	if( val >= (u64)(SEMERU_START_ADDR + RDMA_META_REGION_SWAP_PART_OSSFET) && val < (u64)(SEMERU_START_ADDR + (u64)MAX_REGION_NUM*REGION_SIZE_GB*ONE_GB)  ){
+
+		#ifdef DEBUG_SWAP_PATH_DETAIL
+			printk(KERN_INFO "%s, virt page 0x%llx is within swapped out range[ 0x%llx, 0x%llx]\n",__func__,
+																	val, (u64)(SEMERU_START_ADDR + RDMA_META_REGION_SWAP_PART_OSSFET), 
+																	(u64)(SEMERU_START_ADDR + (u64)MAX_REGION_NUM*REGION_SIZE_GB*ONE_GB));
+		#endif
+
 		return 1;
 	}
 
-	// 2) madvise  [1GB, 2GB)
-	// Debug mode.
-	if( val >= (u64)0x40000000 && val < (u64)0x80000000  ){
-		return 1;
-	}
 
+	#ifdef DEBUG_SWAP_PATH_DETAIL
+		printk(KERN_INFO "%s, virt page 0x%llx is NOT within swapped out range[ 0x%llx, 0x%llx]\n",__func__,
+																	val, (u64)(SEMERU_START_ADDR + RDMA_META_REGION_SWAP_PART_OSSFET), 
+																	(u64)(SEMERU_START_ADDR + (u64)MAX_REGION_NUM*REGION_SIZE_GB*ONE_GB));
+	#endif
+	
 	return 0;
 }
 

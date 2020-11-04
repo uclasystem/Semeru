@@ -299,7 +299,7 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 		goto out;
 	}
 
-	if (frontswap_store(page) == 0) {	// #2, some kind of swap ?
+	if (frontswap_store(page) == 0) {	// #2, Fast swap path. Synchronous swap out to a ultra fast device.
 		set_page_writeback(page);
 		unlock_page(page);
 		end_page_writeback(page);

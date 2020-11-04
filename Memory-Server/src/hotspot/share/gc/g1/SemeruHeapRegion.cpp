@@ -594,7 +594,7 @@ void SemeruHeapRegion::allocate_init_target_oop_bitmap(uint hrm_index){
   // The instance should be allocated in RDMA Meta space.
   _sync_mem_cpu->_cross_region_ref_target_queue = new (CROSS_REGION_REF_TARGET_Q_LEN, hrm_index) BitQueue(SemeruGrainWords);  
   _sync_mem_cpu->_cross_region_ref_target_queue->initialize((size_t)hrm_index, bottom());
-  log_debug(semeru,alloc)("%s,Region[0x%x] _cross_region_ref_target_queue [0x%lx, 0x%lx), bitmap : 0x%lx ", __func__, 
+  log_debug(semeru,alloc)("%s,Region[%d] _cross_region_ref_target_queue [0x%lx, 0x%lx), bitmap : 0x%lx ", __func__, 
                                                                            hrm_index, 
                                                                            (size_t)_sync_mem_cpu->_cross_region_ref_target_queue, 
                                                                            (size_t)CHeapRDMAObj<ElemPair, CROSS_REGION_REF_UPDATE_QUEUE_ALLOCTYPE>::_alloc_ptr,
@@ -606,7 +606,7 @@ void SemeruHeapRegion::allocate_init_cross_region_ref_update_queue(uint hrm_inde
   // CHeapRDMAObj::new(instance_size(asigned by new), element_legnth, q_index, alloc_type )
   // _sync_mem_cpu->_cross_region_ref_update_queue = new (CROSS_REGION_REF_UPDATE_Q_LEN, hrm_index) HashQueue(NULL);   // The instance should be allocated in RDMA Meta space.
   // _sync_mem_cpu->_cross_region_ref_update_queue->initialize((size_t)hrm_index, bottom());
-	// log_debug(semeru,alloc)("%s,Region[0x%x] cross_region_ref_update_queue [0x%lx, 0x%lx) ", __func__, 
+	// log_debug(semeru,alloc)("%s,Region[%d] cross_region_ref_update_queue [0x%lx, 0x%lx) ", __func__, 
   //                                                                         hrm_index, 
   //                                                                         (size_t)_sync_mem_cpu->_cross_region_ref_update_queue, 
   //                                                                         (size_t)CHeapRDMAObj<ElemPair, CROSS_REGION_REF_UPDATE_QUEUE_ALLOCTYPE>::_alloc_ptr );

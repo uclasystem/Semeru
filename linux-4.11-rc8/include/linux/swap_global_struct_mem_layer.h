@@ -20,9 +20,9 @@
 //
 
 
-//#define SWAP_OUT_MONITOR_VADDR_START		(size_t)(SEMERU_START_ADDR+ RDMA_STRUCTURE_SPACE_SIZE)  // 0x400,100,000,000
-#define SWAP_OUT_MONITOR_VADDR_START		(u64)0x40000000  // for debug
-#define SWAP_OUT_MONITOR_UNIT_LEN_LOG		26		 						 // 1<<26, 64M per entry. The query can span multiple entries.
+//#define SWAP_OUT_MONITOR_VADDR_START		(size_t)(SEMERU_START_ADDR+ RDMA_STRUCTURE_SPACE_SIZE)  // Start of Data Regions, 0x400,100,000,000
+#define SWAP_OUT_MONITOR_VADDR_START		(size_t)SEMERU_START_ADDR		// Start of Meta Region, 0x400,000,000,000
+#define SWAP_OUT_MONITOR_UNIT_LEN_LOG		26		 						 // 1<<26, recording granulairy is 64M per entry. The query can span multiple entries.
 #define SWAP_OUT_MONITOR_OFFSET_MASK		(u64)(~((1<<SWAP_OUT_MONITOR_UNIT_LEN_LOG) -1))		//0xfffffffff0000000
 #define SWAP_OUT_MONITOR_ARRAY_LEN			(u64)2*1024*1024	 //2M item, Coverred heap size: SWAP_OUT_MONITOR_ARRAY_LEN * (1<<SWAP_OUT_MONITOR_UNIT_LENG_LOG)
 
@@ -37,7 +37,7 @@
 extern atomic_t on_demand_swapin_number;
 extern atomic_t hit_on_swap_cache_number;
 
-extern u32 jvm_region_swap_out_counter[]; // 4 bytes for each counter is good enough.
+extern atomic_t jvm_region_swap_out_counter[]; // 4 bytes for each counter is good enough.
 
 
 
@@ -65,6 +65,7 @@ static int get_hit_on_swap_cache_number(void){
 }
 
 
+//
 // The swap out procedure is done by kernel.
 // 1) It should be 1-thread.
 // 2) If swap out/in one page frequently, will this cause error ?
@@ -72,19 +73,21 @@ static int get_hit_on_swap_cache_number(void){
 //	  If it's swapped in, we already decrease it from the count.
 static inline void swap_out_one_page_record(u64 vaddr){
 	u64 entry_ind = (vaddr - SWAP_OUT_MONITOR_VADDR_START) >> SWAP_OUT_MONITOR_UNIT_LEN_LOG;
-	jvm_region_swap_out_counter[entry_ind]++;
+	//jvm_region_swap_out_counter[entry_ind]++;
+	atomic_inc(&jvm_region_swap_out_counter[entry_ind]);
 
 	#ifdef DEBUG_MODE_DETAIL
 		printk("%s, swap out page, entry[0x%llx] vaddr 0x%llx \n", __func__, entry_ind, vaddr);
 	#endif
 }
 
-
+// Cause we can't monitor the pages via prefeched path accurately. 
 // We are recording pte <-> Page map, not the actual swapin.
 //
 static inline void swap_in_one_page_record(u64 vaddr){
 	u64 entry_ind = (vaddr - SWAP_OUT_MONITOR_VADDR_START) >> SWAP_OUT_MONITOR_UNIT_LEN_LOG;
-	jvm_region_swap_out_counter[entry_ind]--;
+	//jvm_region_swap_out_counter[entry_ind]--;
+	atomic_dec(&jvm_region_swap_out_counter[entry_ind]);
 
 	#ifdef DEBUG_MODE_DETAIL
 		printk("%s, swap in page, entry[0x%llx], vaddr 0x%llx \n", __func__, entry_ind, vaddr);
@@ -105,13 +108,13 @@ static inline u64 swap_out_pages_for_range(u64 start_vaddr, u64 end_vaddr){
 	u32 i;
 
 	#ifdef DEBUG_MODE_BRIEF
-	printk("%s, Get the swapped out pages for addr[0x%llx, 0x%llx), entry[0x%llx, 0x%llx) \n", __func__, 
+	printk("%s, Get the swapped out pages for addr[0x%llx, 0x%llx), entry[0x%llx, 0x%llx] \n", __func__, 
 																															(u64)start_vaddr, (u64)end_vaddr,
 																															entry_start, entry_end);
 	#endif
 
 	for(i=entry_start; i<=entry_end; i++ ){
-		swap_out_total += jvm_region_swap_out_counter[i];
+		swap_out_total += (u64)atomic_read(&jvm_region_swap_out_counter[i]);
 	}
 
 	return swap_out_total;

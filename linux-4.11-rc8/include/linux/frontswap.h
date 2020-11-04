@@ -29,6 +29,7 @@ extern int __frontswap_load(struct page *page);
 extern void __frontswap_invalidate_page(unsigned, pgoff_t);
 extern void __frontswap_invalidate_area(unsigned);
 
+// CONFIG_FRONTSWAP is enabled in .config
 #ifdef CONFIG_FRONTSWAP
 extern struct static_key_false frontswap_enabled_key;
 

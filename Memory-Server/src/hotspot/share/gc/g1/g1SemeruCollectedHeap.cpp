@@ -1587,7 +1587,7 @@ G1SemeruCollectedHeap::G1SemeruCollectedHeap(G1SemeruCollectorPolicy* collector_
  	CollectedHeap(true),
 	_recv_mem_server_cset(NULL),
 	_cpu_server_flags(NULL),
-	//_debug_rdma_padding_flag_variable(NULL),
+	_debug_meta_region_padding(NULL),
 	//_debug_rdma_padding_target_obj_queue(NULL),
 	_debug_rdma_padding_alive_bitmap(NULL),
 	_semeru_rs(NULL),
@@ -2018,11 +2018,13 @@ jint G1SemeruCollectedHeap::initialize_memory_pool() {
 //	#endif
 
 	// Debug
+	// Padding the available sapce of Meta region
+	// 
 	// Do padding for the first GB meta data space. Until the start of alive_bitmap.
-	// _debug_rdma_padding_flag_variable		= new(RDMA_PADDING_SIZE_LIMIT, rdma_rs.base() + RDMA_PADDING_OFFSET) rdma_padding();
-	// tty->print("WARNING in %s, padding data in Meta Region[0x%lx, 0x%lx) for meta flag variables. \n",__func__,
-	// 																																								(size_t)(rdma_rs.base() + RDMA_PADDING_OFFSET),
-	// 																																								(size_t)RDMA_PADDING_SIZE_LIMIT);
+	_debug_meta_region_padding		= new(RDMA_PADDING_SIZE_LIMIT, rdma_rs.base() + RDMA_PADDING_OFFSET) rdma_padding();
+	tty->print("%s, (Memory Server Only) WARNING, padding data in Meta Region[0x%lx, 0x%lx). \n",__func__,
+	 																																				(size_t)(rdma_rs.base() + RDMA_PADDING_OFFSET),
+	 																																				(size_t)(rdma_rs.base() + RDMA_PADDING_OFFSET + RDMA_PADDING_SIZE_LIMIT));
 
 	//
 	// End of RDMA structure section

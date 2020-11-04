@@ -620,7 +620,7 @@ void G1SemeruConcurrentMarkThread::run_service() {
     //#ifdef ASSERT
       // Infinite loop. 
       // Debug - Sleep and wake up to check CSet.
-      os::sleep(this, 1000, false); // sleep a while to wait for CSet..
+      os::sleep(this, 600, false); // sleep a while to wait for CSet..
     //#endif
     //set_semeru_ms_gc_terminated();
     //this->_should_terminate = true;

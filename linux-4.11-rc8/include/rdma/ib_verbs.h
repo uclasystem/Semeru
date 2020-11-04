@@ -919,8 +919,8 @@ enum ib_wc_flags {
  */
 struct ib_wc {
 	union {
-		u64		wr_id;				// [?] the attached rdma_command address ??
-		struct ib_cqe	*wr_cqe;
+		u64		wr_id;						// [?] the attached context address. used for ib_create_cq with handler function
+		struct ib_cqe	*wr_cqe;	// [?] a list ? used for ib_alloc_cq && ib_cqe.done handler. 
 	};
 	enum ib_wc_status	status;		// 1) Check the status to see if the wc is correct. 
 	enum ib_wc_opcode	opcode; 	// 2) Check the opcode to identify the type of this message.
@@ -1274,7 +1274,7 @@ enum ib_send_flags {
 struct ib_sge {
 	u64	addr;			// DMA address of the (DMA) buffer
 	u32	length;		// length of the (DMA) buffer
-	u32	lkey;			// [?] Memory retion protection key, Get from ib_mr->lkey
+	u32	lkey;			// Memory Region protection key, Get from ib_mr->lkey
 };
 
 struct ib_cqe {
@@ -1316,7 +1316,7 @@ struct ib_send_wr {
 	int								num_sge;		// Usually, 1
 
 	enum ib_wr_opcode	opcode;				// Pass this opcode to wc.
-	int								send_flags;		// ?
+	int								send_flags;		// 
 	union {
 		__be32	imm_data;
 		u32			invalidate_rkey;

@@ -141,7 +141,7 @@ void frontswap_register_ops(struct frontswap_ops *ops)
 		ops->next = frontswap_ops;
 	} while (cmpxchg(&frontswap_ops, ops->next, ops) != ops->next);
 
-	static_branch_inc(&frontswap_enabled_key);
+	static_branch_inc(&frontswap_enabled_key);  // enable the frontswap path
 
 	spin_lock(&swap_lock);
 	plist_for_each_entry(si, &swap_active_head, list) {

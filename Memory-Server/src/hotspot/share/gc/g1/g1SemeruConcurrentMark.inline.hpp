@@ -450,7 +450,7 @@ inline bool G1SemeruCMTask::make_reference_alive(oop obj) {
     return false;
   }
 
-	log_trace(semeru,mem_trace)("%s, mark obj 0x%lx alive in Region[0x%x]'s alive_bitmap", __func__, (size_t)(HeapWord*)obj ,_curr_region->hrm_index() );
+	log_trace(semeru,mem_trace)("%s, mark obj 0x%lx alive in Region[%d]'s alive_bitmap", __func__, (size_t)(HeapWord*)obj ,_curr_region->hrm_index() );
 
   // No OrderAccess:store_load() is needed. It is implicit in the
   // CAS done in G1CMBitMap::parMark() call in the routine above.

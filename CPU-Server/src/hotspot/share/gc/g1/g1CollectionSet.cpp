@@ -422,7 +422,7 @@ void G1CollectionSet::print(outputStream* st) {
 
 
 
-
+/*
 //mhr: modify
 //mhr: explanation:
   //Choose all regions with high garbage ratio and cache ratio
@@ -484,7 +484,7 @@ void G1CollectionSet::finalize_parts_with_ratio(G1SurvivorRegions* survivors) {
       size_t cache_pages = cache_ratio_pages(hr);
 
       
-      tty->print("Region %u: scanned? %d, cache: %lf, alive ratio: %lf, queue_age: %d\n", hr->hrm_index(),hr->_mem_to_cpu_gc->_cm_scanned,
+      log_debug(semeru)("%s, Region %u: scanned? %d, cache: %lf, alive ratio: %lf, queue_age: %d\n", __func__, hr->hrm_index(),hr->_mem_to_cpu_gc->_cm_scanned,
        (double )cache_pages*PAGE_SIZE/HeapRegion::GrainBytes, hr->_mem_to_cpu_gc->_alive_ratio, hr->cross_region_ref_target_queue()->_age);
 
       if(hr->_mem_to_cpu_gc->_cm_scanned && (double )(cache_pages*PAGE_SIZE/HeapRegion::GrainBytes) - hr->_mem_to_cpu_gc->_alive_ratio > 0.2) {
@@ -505,6 +505,8 @@ void G1CollectionSet::finalize_parts_with_ratio(G1SurvivorRegions* survivors) {
               rmsc->add(hr->hrm_index());
               _g1h->old_set_remove(hr);
               add_optional_region(hr);
+              log_debug(semeru)("%s, region[%u] is added into memory srever CSet, cache ratio %lf \n", __func__, 
+                                              hr->hrm_index(), (double)(cache_pages*PAGE_SIZE/HeapRegion::GrainBytes) );
 
               //hr->cross_region_ref_update_queue()->reset();
 
@@ -519,6 +521,8 @@ void G1CollectionSet::finalize_parts_with_ratio(G1SurvivorRegions* survivors) {
             rmsc->add(hr->hrm_index());
             _g1h->old_set_remove(hr);
             add_optional_region(hr);
+            log_debug(semeru)("%s, region[%u] is added into memory srever CSet, cache ratio %lf \n", __func__, 
+                                              hr->hrm_index(), (double)(cache_pages*PAGE_SIZE/HeapRegion::GrainBytes) );
           }
         }
       }
@@ -526,7 +530,7 @@ void G1CollectionSet::finalize_parts_with_ratio(G1SurvivorRegions* survivors) {
     }
     else { // humonguous region and young region fall into this path.
 
-      log_debug(semeru)("%s, region[0x%x] humonguous? %d", __func__, hr->hrm_index(), hr->is_humongous() );
+      log_debug(semeru)("%s, region[%u] humonguous? %d", __func__, hr->hrm_index(), hr->is_humongous() );
 
     }
 
@@ -569,7 +573,7 @@ void G1CollectionSet::finalize_parts_with_ratio(G1SurvivorRegions* survivors) {
   printf("\n");
 
 }
-
+*/
 
 
 
@@ -584,7 +588,8 @@ void G1CollectionSet::finalize_parts(G1SurvivorRegions* survivors) {
   //mhr: TODO
   //mhr: not sure
   // finalize_incremental_building();
-  size_t cache_threshold_in_pages = _policy->cache_threshold_in_pages(); //mhr: need to implement
+  size_t cssc_cache_threshold_in_pages = _policy->cssc_cache_threshold_in_pages(); //mhr: need to implement
+  size_t msct_cache_threshold_in_pages = _policy->msct_cache_threshold_in_pages(); 
   size_t max_cset_length = _policy->calc_max_cserver_cset_length();
   size_t new_collection_set_length = 0;
   size_t candidates_length = 0;
@@ -637,29 +642,39 @@ void G1CollectionSet::finalize_parts(G1SurvivorRegions* survivors) {
     }
     else if(hr->is_old()){
       
-      log_debug(semeru)("Region %u marked from root: %d\n", i, hr->cross_region_ref_target_queue()->_marked_from_root);
-      log_debug(semeru)("Region %u scanned?: %d\n", i, hr->_mem_to_cpu_gc->_cm_scanned);
-      log_debug(semeru)("Region %u alive ratio: %lf\n", i, hr->_mem_to_cpu_gc->_alive_ratio);
+      log_debug(semeru)("%s, Region %u marked from root: %d",__func__, i, hr->cross_region_ref_target_queue()->_marked_from_root);
+      log_debug(semeru)("%s, Region %u scanned?: %d",__func__, i, hr->_mem_to_cpu_gc->_cm_scanned);
+      log_debug(semeru)("%s, Region %u alive ratio: %lf",__func__, i, hr->_mem_to_cpu_gc->_alive_ratio);
 
-      if(cache_ratio_pages(hr) > cache_threshold_in_pages && hr->_mem_to_cpu_gc->_cm_scanned) {
+      size_t region_cached_pages = cache_ratio_pages(hr); // Get the number of cached pages for this region.
+
+      if(region_cached_pages > cssc_cache_threshold_in_pages && hr->_mem_to_cpu_gc->_cm_scanned) {
          /*&& hr->_mem_to_cpu_gc->_alive_ratio < 0.5*/
-        log_debug(semeru)("Candidate Region %u scanned?: %d\n", i, hr->_mem_to_cpu_gc->_cm_scanned);
-        log_debug(semeru)("Candidate Region %u alive ratio: %lf\n", i, hr->_mem_to_cpu_gc->_alive_ratio);
+        log_debug(semeru)("%s, Candidate Region %u scanned?: %d",__func__, i, hr->_mem_to_cpu_gc->_cm_scanned);
+        log_debug(semeru)("%s, Candidate Region %u alive ratio: %lf",__func__, i, hr->_mem_to_cpu_gc->_alive_ratio);
         //mhr: debug
         candidates_regions[candidates_length++] = hr;
-
       }
       else if(!_g1h->_allocator->is_retained_old_region(hr) && !hr->_mem_to_cpu_gc->_cm_scanned && !hr->cross_region_ref_target_queue()->_marked_from_root){
-        rmsc->add(hr->hrm_index());
-
-        // mhr: add as optional
+        
+        // Only flush regions withi low cache ratio to memory servers
+        if(region_cached_pages > msct_cache_threshold_in_pages){
+          log_debug(semeru)("%s, region[%u] cache ratio %lf is higher than cache threshold %lf, skip the MSCT.", __func__, 
+                                              hr->hrm_index(), (double)region_cached_pages*PAGE_SIZE/HeapRegion::GrainBytes, 
+                                              (double)msct_cache_threshold_in_pages*PAGE_SIZE/HeapRegion::GrainBytes );
+          continue;
+        }
+        
+        rmsc->add(hr->hrm_index()); // add this region into memory server CSet
         _g1h->old_set_remove(hr);
         add_optional_region(hr);
+        log_info(semeru)("%s, region[%u] is added into memory srever CSet, cache ratio %lf", __func__, 
+                                              hr->hrm_index(), (double)region_cached_pages*PAGE_SIZE/HeapRegion::GrainBytes );
       }
     }
     else { // humonguous region fall into this path.
 
-      log_debug(semeru)("%s, region[0x%x] humonguous? %d", __func__, hr->hrm_index(), hr->is_humongous() );
+      log_debug(semeru)("%s, region[%u] humonguous? %d", __func__, hr->hrm_index(), hr->is_humongous() );
 
       //rmsc->add(hr->hrm_index());
       // mhr: add as optional
@@ -711,9 +726,13 @@ void G1CollectionSet::finalize_parts(G1SurvivorRegions* survivors) {
   // }
   for(; cset_boundary < candidates_length; cset_boundary++) {
     hr = candidates_regions[cset_boundary];
-    // if(_g1h->_allocator->is_retained_old_region(hr)) {
-    //   continue;
-    // }
+    
+    //mhr4debug
+    if(_g1h->_allocator->is_retained_old_region(hr)) {
+      continue;
+    }
+
+    // if((hr->_mem_to_cpu_gc->_alive_ratio < 0.30)|| (_g1h->fullGC == 1 && hr->_mem_to_cpu_gc->_alive_ratio < 1.0 && hr->hrm_index()==0)) {
     if(hr->_mem_to_cpu_gc->_alive_ratio < 0.30) {
       _g1h->old_set_remove(hr);
       _collection_set_regions[_collection_set_cur_length++] = hr->hrm_index();
@@ -736,9 +755,9 @@ void G1CollectionSet::finalize_parts(G1SurvivorRegions* survivors) {
         hr->cross_region_ref_target_queue()->reset();
         //hr->_mem_to_cpu_gc->_cm_scanned = false;
         hr->reset_region_cm_scanned();
-        log_debug(semeru)("Rescan Region %u marked from root: %d %d\n", hr->hrm_index(), hr->cross_region_ref_target_queue()->_marked_from_root, hr->cross_region_ref_target_queue()->_marked_from_root);
-        log_debug(semeru)("Rescan Region %u scanned?: %d\n", hr->hrm_index(), hr->_mem_to_cpu_gc->_cm_scanned);
-        log_debug(semeru)("Rescan Region %u alive ratio: %lf\n", hr->hrm_index(), hr->_mem_to_cpu_gc->_alive_ratio);
+        log_debug(semeru)("Rescan Region %u marked from root: %d %d", hr->hrm_index(), hr->cross_region_ref_target_queue()->_marked_from_root, hr->cross_region_ref_target_queue()->_marked_from_root);
+        log_debug(semeru)("Rescan Region %u scanned?: %d", hr->hrm_index(), hr->_mem_to_cpu_gc->_cm_scanned);
+        log_debug(semeru)("Rescan Region %u alive ratio: %lf", hr->hrm_index(), hr->_mem_to_cpu_gc->_alive_ratio);
         _collection_set_regions[_collection_set_cur_length++] = hr->hrm_index();
         _rebuild_set_length++;
       }
@@ -746,35 +765,24 @@ void G1CollectionSet::finalize_parts(G1SurvivorRegions* survivors) {
   }
 
 
-
-
-
-
   
-  printf("%lu\n", _collection_set_cur_length);
 
   _old_region_length = _collection_set_cur_length - young_region_length();
-
   stop_incremental_building();
 
-  //QuickSort::sort(_collection_set_regions, _collection_set_cur_length, G1CollectionSet::compare_region_idx, true);
-  
   FREE_C_HEAP_ARRAY(HeapRegion*, candidates_regions);
 
 
-
-
   //mhr: debug
-  printf("_collection_set_cur_length: %lu\n _collection_set: ", _collection_set_cur_length);
+  log_info(semeru,rdma)("%s, _collection_set_cur_length: %lu, _collection_set: ",__func__, _collection_set_cur_length);
   for(size_t i = 0; i < _collection_set_cur_length; i++)
-    printf("%d ", _collection_set_regions[i]);
-  printf("\n");
+    log_info(semeru,rdma)("%d ", _collection_set_regions[i]);
+  log_info(semeru,rdma)("--End--");
 
-    //mhr: debug
-  printf("_optional_set_cur_length: %u\n _collection_set: ", _optional_region_length);
+  log_info(semeru,rdma)("_optional_set_cur_length: %u, (memory_server) _collection_set: ", _optional_region_length);
   for(size_t i = 0; i < _optional_region_length; i++)
-    printf("%d ", _optional_regions[i]->hrm_index());
-  printf("\n");
+    log_info(semeru,rdma)("%d ", _optional_regions[i]->hrm_index());
+  log_info(semeru,rdma)("--End--");
 
 }
 
@@ -879,25 +887,21 @@ static int compare_region_idx(const uint a, const uint b) {
   }
 }
 
+/**
+ * Return the pages cached in CPU server local DRAM of this region, hr. 
+ */
 size_t G1CollectionSet::cache_ratio_pages(HeapRegion* hr) {
-  // int pid = os::current_process_id();
-  // HeapWord* btm = hr->bottom();
-  // HeapWord* top = hr->bottom() + HeapRegion::GrainBytes/8;
-  // //return ((unsigned long)(pages_inmem_ratio(pid, (unsigned long)btm, (unsigned long)top)))*((((unsigned long)top - (unsigned long)top)) / 0x1000);
-  // return 1*((((unsigned long)top - (unsigned long)btm)) / 0x1000);
-  // //return HeapRegion::GrainBytes/4/1024*80/100;
-
 
   // Example of use swap out ratio
   // Kernel doesn't float point, so we can only renturn the swapped out page numbers.
   // The requested range can only be at [SEMERU_START_ADDR + RDMA_STRUCTURE_SPACE_SIZE, to the heap END(32GB max))
-  size_t request_so_start_addr = (size_t)hr->bottom();//SEMERU_START_ADDR + RDMA_STRUCTURE_SPACE_SIZE;
-  size_t request_so_range = HeapRegion::GrainBytes; // one Region, assume 256 MBytes
-  size_t swapped_out_pages  = syscall(SYS_NUM_SWAP_OUT_PAGES, request_so_start_addr, request_so_range);
-  tty->print("%s, swapped out 0x%lx pages (%f) for range[0x%lx, 0x%lx) \n", 
-                __func__, swapped_out_pages, (double)swapped_out_pages*PAGE_SIZE/HeapRegion::GrainBytes, request_so_start_addr, request_so_start_addr+request_so_range  );
+  size_t request_start_addr = (size_t)hr->bottom();
+  size_t request_size = HeapRegion::GrainBytes; // one Region
+  size_t swapped_out_pages  = syscall(SYS_NUM_SWAP_OUT_PAGES, request_start_addr, request_size);
+  log_debug(semeru)("%s, Region[%u], swapped out 0x%lx pages ( out of 0x%lx pages, ratio %f) for range[0x%lx, 0x%lx) \n", 
+                __func__, hr->hrm_index(), swapped_out_pages, HeapRegion::GrainBytes/PAGE_SIZE , (double)swapped_out_pages*PAGE_SIZE/HeapRegion::GrainBytes, 
+                request_start_addr, request_start_addr + request_size );
   return HeapRegion::GrainBytes/PAGE_SIZE-swapped_out_pages;
-
 }
 
 void G1CollectionSet::finalize_old_part(double time_remaining_ms) {

@@ -176,14 +176,29 @@ bool CollectedHeap::request_concurrent_phase(const char* phase) {
 
 bool CollectedHeap::is_oop(oop object) const {
   if (!check_obj_alignment(object)) {
+
+    //debug
+    // #ifdef ASSERT
+    // tty->print("obj 0x%lx failed #1, not alignment \n",(size_t)object.obj() );
+    // #endif
     return false;
   }
 
   if (!is_in_reserved(object)) {
+    //debug
+    // #ifdef ASSERT
+    // tty->print("obj 0x%lx failed #2 not in reserved[0x%lx, 0x%lx) \n",(size_t)object.obj(), (size_t)_reserved.start() , (size_t)_reserved.end() );
+    // #endif
     return false;
   }
 
+  // The klass instance should not in Java heap space. 
   if (is_in_reserved(object->klass_or_null())) {
+    //debug
+    // #ifdef ASSERT
+    // tty->print("obj 0x%lx failed #3, klass 0x%lx, SHOULD NOT in reserved[0x%lx, 0x%lx) ? %d \n",
+    //             (size_t)object.obj(), (size_t)object->klass_or_null(), (size_t)_reserved.start(), (size_t)_reserved.end(), _reserved.contains(object->klass_or_null()) );
+    // #endif
     return false;
   }
 

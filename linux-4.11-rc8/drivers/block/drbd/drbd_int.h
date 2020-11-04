@@ -1343,7 +1343,9 @@ struct bm_extent {
  * we limit us to a platform agnostic constant here for now.
  * A followup commit may allow even bigger BIO sizes,
  * once we thought that through. */
-#define DRBD_MAX_BIO_SIZE (1U << 20)
+//#define DRBD_MAX_BIO_SIZE (1U << 20)
+
+#define DRBD_MAX_BIO_SIZE (BIO_MAX_PAGES << PAGE_SHIFT) 
 #if DRBD_MAX_BIO_SIZE > (BIO_MAX_PAGES << PAGE_SHIFT)
 #error Architecture not supported: DRBD_MAX_BIO_SIZE > BIO_MAX_SIZE
 #endif

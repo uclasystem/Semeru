@@ -226,6 +226,7 @@ inline void HeapRegion::apply_to_marked_objects(G1CMBitMap* bitmap, ApplyToMarke
     // the case where next_addr is marked.
     if (bitmap->is_marked(next_addr)) {
       oop current = oop(next_addr);
+      closure->set_containing_obj(current);
       next_addr += closure->apply(current);
     } else {
       next_addr = bitmap->get_next_marked_addr(next_addr, limit);

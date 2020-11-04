@@ -2800,18 +2800,15 @@ int do_swap_page(struct vm_fault *vmf)
 	if (unlikely(!page)) {
 		ret = VM_FAULT_OOM;
 					
-		//debug
-		//printk(KERN_ERR"%s, error in #2.", __func__);
-
 		page = swapcache;
 		goto out_page;
 	}
 
+	// Count the page into cgroup before mapping into process
+	// but after hitting on the swapcache.
 	if (mem_cgroup_try_charge(page, vma->vm_mm, GFP_KERNEL,
 				&memcg, false)) {
 		ret = VM_FAULT_OOM;
-		//debug
-		//printk(KERN_ERR"%s, error in #3. mem_cgroup charge failed ", __func__);
 
 		goto out_page;
 	}

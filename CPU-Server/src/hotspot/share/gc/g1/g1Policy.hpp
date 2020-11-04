@@ -249,7 +249,8 @@ public:
 
   //mhr: modify
   uint calc_max_cserver_cset_length();
-  uint cache_threshold_in_pages() const;
+  uint cssc_cache_threshold_in_pages() const;
+  uint msct_cache_threshold_in_pages() const;
   uint garbage_threshold_in_bytes() const;
 
   // Calculate the minimum number of old regions we'll add to the CSet

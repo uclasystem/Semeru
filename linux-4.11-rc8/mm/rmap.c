@@ -1318,9 +1318,9 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 	struct rmap_private *rp = arg;
 	enum ttu_flags flags = rp->flags;
 
-	//#ifdef DEBUG_SWAP_PATH_DETAIL
+	#ifdef DEBUG_SWAP_PATH_DETAIL
 	bool enable_debug = false;
-	//#endif
+	#endif
 
 	/* munlock has nothing to gain from examining un-locked vmas */
 	if ((flags & TTU_MUNLOCK) && !(vma->vm_flags & VM_LOCKED))

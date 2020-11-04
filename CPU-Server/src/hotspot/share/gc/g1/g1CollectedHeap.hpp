@@ -189,6 +189,7 @@ public :
   double gctime;
   double commtime;
   double regiontime;
+  //bool fullGC;
 
   static int compare_meta_st(const AddrPair a, const AddrPair b) ;
 
@@ -201,7 +202,9 @@ public :
   flags_of_mem_server_state* _mem_server_flags;
 
   received_memory_server_cset* recv_mem_server_cset() { return _recv_mem_server_cset;  }
-  void update_cset_to_mem_server(size_t mem_id )	{ syscall(RDMA_WRITE, mem_id, _recv_mem_server_cset, MEMORY_SERVER_CSET_SIZE);	 }
+  void update_cset_to_mem_server(size_t mem_id )	{ 
+    syscall(RDMA_WRITE_SIGNAL, mem_id, _recv_mem_server_cset, MEMORY_SERVER_CSET_SIZE);	 
+  }
 
   flags_of_cpu_server_state* cpu_server_flags() { return _cpu_server_flags;  }
   void send_cpu_server_flags_to_mem_server()	  { 
@@ -217,7 +220,7 @@ public :
     // Fix me
     //
     guarantee(false, "%s, Can't invoke this function for now.", __func__);
-    syscall(RDMA_READ, mem_id, _cpu_server_flags, FLAGS_OF_CPU_SERVER_STATE_SIZE);	 
+    //syscall(RDMA_READ, mem_id, _cpu_server_flags, FLAGS_OF_CPU_SERVER_STATE_SIZE);	 
     
   }
 
@@ -235,7 +238,7 @@ public :
     // Fix me
     //
     guarantee(false, "%s, Can't invoke this function for now.", __func__);
-    syscall(RDMA_READ, mem_id, _mem_server_flags, FLAGS_OF_MEM_SERVER_STATE_SIZE);	 
+    //syscall(RDMA_READ, mem_id, _mem_server_flags, FLAGS_OF_MEM_SERVER_STATE_SIZE);	 
     
   }
 

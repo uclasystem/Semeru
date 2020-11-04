@@ -40,7 +40,7 @@ static int __ib_process_cq(struct ib_cq *cq, int budget)
 			struct ib_wc *wc = &cq->wc[i];
 
 			if (wc->wr_cqe)
-				wc->wr_cqe->done(cq, wc);
+				wc->wr_cqe->done(cq, wc);  // invoke the registered ib_cqe.done function.
 			else
 				WARN_ON_ONCE(wc->status == IB_WC_SUCCESS);
 		}

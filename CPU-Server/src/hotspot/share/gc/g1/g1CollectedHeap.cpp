@@ -1125,6 +1125,7 @@ void G1CollectedHeap::print_heap_after_full_collection(G1HeapTransition* heap_tr
 bool G1CollectedHeap::do_full_collection(bool explicit_gc,
                                          bool clear_all_soft_refs) {
   assert_at_safepoint_on_vm_thread();
+  //fullGC = 1;
 
   if (GCLocker::check_active_before_gc()) {
     // Full GC was not completed.
@@ -3259,7 +3260,6 @@ G1CollectedHeap::do_collection_pause_at_safepoint(double target_pause_time_ms) {
             }
             if((size_t)pair_array[i].st > send_end + 0x4000) {
               //log_debug(semeru, rdma)("Write metadata 0x%lx , size 0x%lx to Memory Server", (size_t)send_base , ((send_end - (size_t)send_base -1)/0x1000 + 1)*0x1000 );
-              //syscall(RDMA_WRITE, send_base, ((send_end - (size_t)send_base -1)/0x1000 + 1)*0x1000);
               for(int mem_id =0; mem_id < NUM_OF_MEMORY_SERVER; mem_id++){
                 syscall(RDMA_WRITE, mem_id, send_base, (send_end - (size_t)send_base));  // flush the klass to each memory servers
                 log_debug(semeru, rdma)("Write metadata 0x%lx , size 0x%lx to all Memory Server[%d]", (size_t)send_base , (send_end - (size_t)send_base), mem_id );
@@ -4385,11 +4385,11 @@ void G1CollectedHeap::evacuate_collection_set(G1ParScanThreadStateSet* per_threa
       // Update cset to memory server, if non-empty
       if(num_mem_cset){
         update_cset_to_mem_server(mem_id);
-        log_info(semeru,rdma)("%s, write %lx regions cset to memory server[%lx] ",__func__, num_mem_cset, mem_id);
+        log_info(semeru,rdma)("%s, write %lx regions cset to memory server[%lu] ",__func__, num_mem_cset, mem_id);
       }
 
     }// end of mem_id, each memory server
-    log_info(semeru,rdma)("%s, Update CSet to all memory servers. \n", __func__);
+    log_info(semeru,rdma)("%s, Send information to all memory servers done.\n", __func__);
 
 
     close_stw_window();
@@ -4903,6 +4903,11 @@ void G1CollectedHeap::evacuate_optional_collection_set(G1ParScanThreadStateSet* 
   phase_times->record_optional_evacuation((os::elapsedTime() - start_time_sec) * 1000.0);
 }
 
+
+/**
+ * [?] What's the purpose ?
+ *  
+ */
 void G1CollectedHeap::post_evacuate_collection_set(EvacuationInfo& evacuation_info, G1ParScanThreadStateSet* per_thread_states) {
   // Also cleans the card table from temporary duplicate detection information used
   // during UpdateRS/ScanRS.
@@ -5642,7 +5647,7 @@ public:
       r->set_free();
       _hrm->insert_into_free_list(r);
     } else if (!_free_list_only) {
-      assert(r->rem_set()->is_empty(), "At this point remembered sets must have been cleared.");
+      //assert(r->rem_set()->is_empty(), "At this point remembered sets must have been cleared.");
 
       if (r->is_archive() || r->is_humongous()) {
         // We ignore archive and humongous regions. We left these sets unchanged.

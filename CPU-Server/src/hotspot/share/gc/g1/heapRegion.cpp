@@ -269,23 +269,12 @@ HeapRegion::HeapRegion(uint hrm_index,
 {
 
   // Semeru
-  // added by Chenxi
-    // Initialize the RDMA meta data space
+  // Initialize the RDMA meta data space
   _cpu_to_mem_init = new(hrm_index) CPUToMemoryAtInit(hrm_index);
-
   _cpu_to_mem_gc = new(hrm_index) CPUToMemoryAtGC(hrm_index);
-
   _mem_to_cpu_gc = new(hrm_index) MemoryToCPUAtGC(hrm_index);
-
   _sync_mem_cpu = new(hrm_index) SyncBetweenMemoryAndCPU(hrm_index, bot, this);
-
-
   _rem_set = new HeapRegionRemSet(bot, this);
-
-  //mhr: modify for sending
-  //mhr: for debug
-	//log_debug(semeru,rdma)("Write _cpu_to_mem_init 0x%lx , size 0x%lx to Memory Server", (size_t)_cpu_to_mem_init , (size_t)(sizeof(CPUToMemoryAtInit)) );
-  //syscall(RDMA_WRITE, _cpu_to_mem_init, sizeof(CPUToMemoryAtInit));
 
   initialize(mr);
 }
@@ -1105,15 +1094,16 @@ void HeapRegion::read_info_at_gc(){
 	syscall(RDMA_READ, 0, _sync_mem_cpu, sizeof(SyncBetweenMemoryAndCPU));
 
 
-  //#2, read cross_region_ref queue
+  //#2, read cross_region_ref queue -- useless now. For Memory server compation.
 	// log_debug(semeru,rdma)("Read CrossRegionRegQueue 0x%lx , size 0x%lx to Memory Server", 
 	// 																(size_t)_sync_mem_cpu->_cross_region_ref_update_queue , (size_t)(align_up(sizeof(HashQueue), PAGE_SIZE)+CROSS_REGION_REF_UPDATE_Q_LEN*24) );
   //TargetObjQueue* tq = _cpu_to_mem_gc->_target_obj_queue;
   // HashQueue* tq = _sync_mem_cpu->_cross_region_ref_update_queue;
   // log_debug(semeru,rdma)("CrossRegionRegQueue[0x%lx]  size: 0x%lx",tq->_region_index,  tq->_length );
 
+  // [?] Useless for now?
   // //printf("TargetObjQueue size: %u\n", tq->bottom());
-  // syscall(RDMA_READ, _sync_mem_cpu->_cross_region_ref_update_queue, align_up(sizeof(HashQueue), PAGE_SIZE)+CROSS_REGION_REF_UPDATE_Q_LEN*24);
+  //syscall(RDMA_READ, _sync_mem_cpu->_cross_region_ref_update_queue, align_up(sizeof(HashQueue), PAGE_SIZE)+CROSS_REGION_REF_UPDATE_Q_LEN*24);
 
 
   //check_cross_region_reg_queue(this, "Check after read.");
@@ -1135,18 +1125,22 @@ void HeapRegion::read_info_before_gc(){
 
 
 //mhr: modify
+// [?] Each Region can only be flushed by one thread, 
+// Should be flushed by gc threads ? Mutators must be suspended ?
 void HeapRegion::flush_data(){
-  int ret;
+  int ret = 0;
   int target_mem_id = region_to_memory_server_mapping();
 
-	log_debug(semeru,rdma)("Write Region 0x%x , size 0x%lx, sent size 0x%lx to Memory Server[%d]", 
+	log_debug(semeru,rdma)("Write Region[%u] , addr 0x%lx, sent size 0x%lx to Memory Server[%d]", 
                         this->hrm_index(),  (size_t)bottom() , (size_t)GrainBytes, target_mem_id );
   
   //debug
   //check_sync_between_memory_and_cpu("Check Region before sent");
-  ret = syscall(RDMA_WRITE, target_mem_id, bottom(), GrainBytes);
+  // [?]Run Control Path with Data Path together can cause CPU server crash.
+  //    And multiple QP can lead to a much higher posibility ??
+  ret = syscall(RDMA_WRITE, target_mem_id, bottom(), GrainBytes);  
   if(ret){
-    tty->print("%s, RDMA write for region[0x%x] to memory server[%d] failed. Crash here. \n", __func__, this->hrm_index(),target_mem_id);
+    tty->print("%s, RDMA write for region[%u] to memory server[%d] failed. Crash here. \n", __func__, this->hrm_index(),target_mem_id);
     guarantee(false," RDMA write failed." );
   }
 

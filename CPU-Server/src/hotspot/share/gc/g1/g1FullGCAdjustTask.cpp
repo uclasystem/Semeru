@@ -40,11 +40,15 @@
 #include "runtime/atomic.hpp"
 
 class G1AdjustLiveClosure : public StackObj {
-  G1AdjustClosure* _adjust_closure;
+  G1AdjustClosureNew* _adjust_closure;
 public:
-  G1AdjustLiveClosure(G1AdjustClosure* cl) :
+  G1AdjustLiveClosure(G1AdjustClosureNew* cl) :
     _adjust_closure(cl) { }
 
+  void set_containing_obj(oop obj) {
+    //tty->print("in adjust live closure set containing obj: 0x%lx\n", (size_t)(HeapWord*)obj);
+    _adjust_closure->set_containing_obj(obj);
+  }
   size_t apply(oop object) {
     return object->oop_iterate_size(_adjust_closure);
   }
@@ -58,25 +62,51 @@ class G1AdjustRegionClosure : public HeapRegionClosure {
     _bitmap(bitmap),
     _worker_id(worker_id) { }
 
+  //mhr: modify
   bool do_heap_region(HeapRegion* r) {
-    G1AdjustClosure cl;
     if (r->is_humongous()) {
+      G1AdjustClosureNew cl;
+      cl.set_worker_id(_worker_id);
       oop obj = oop(r->humongous_start_region()->bottom());
+      cl.set_containing_obj(obj);
       obj->oop_iterate(&cl, MemRegion(r->bottom(), r->top()));
     } else if (r->is_open_archive()) {
       // Only adjust the open archive regions, the closed ones
       // never change.
+      G1AdjustClosureNew cl;
+      cl.set_worker_id(_worker_id);
       G1AdjustLiveClosure adjust(&cl);
       r->apply_to_marked_objects(_bitmap, &adjust);
       // Open archive regions will not be compacted and the marking information is
       // no longer needed. Clear it here to avoid having to do it later.
       _bitmap->clear_region(r);
     } else {
+      G1AdjustClosureNew cl;
+      cl.set_worker_id(_worker_id);
       G1AdjustLiveClosure adjust(&cl);
       r->apply_to_marked_objects(_bitmap, &adjust);
     }
     return false;
   }
+  // bool do_heap_region(HeapRegion* r) {
+  //   G1AdjustClosure cl;
+  //   if (r->is_humongous()) {
+  //     oop obj = oop(r->humongous_start_region()->bottom());
+  //     obj->oop_iterate(&cl, MemRegion(r->bottom(), r->top()));
+  //   } else if (r->is_open_archive()) {
+  //     // Only adjust the open archive regions, the closed ones
+  //     // never change.
+  //     G1AdjustLiveClosure adjust(&cl);
+  //     r->apply_to_marked_objects(_bitmap, &adjust);
+  //     // Open archive regions will not be compacted and the marking information is
+  //     // no longer needed. Clear it here to avoid having to do it later.
+  //     _bitmap->clear_region(r);
+  //   } else {
+  //     G1AdjustLiveClosure adjust(&cl);
+  //     r->apply_to_marked_objects(_bitmap, &adjust);
+  //   }
+  //   return false;
+  // }
 };
 
 G1FullGCAdjustTask::G1FullGCAdjustTask(G1FullCollector* collector) :

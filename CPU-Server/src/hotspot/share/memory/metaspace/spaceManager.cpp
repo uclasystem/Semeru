@@ -256,8 +256,6 @@ void SpaceManager::send_metadata(AddrPair* addrpair, int& pair_num) {
   for(mc = _current_chunk; mc != _last_sent_chunk; mc = mc->next()) {
     addrpair[pair_num].st = (char *)mc->bottom();
     addrpair[pair_num].ed = (char *)(mc->bottom()+mc->word_size());
-		//log_debug(semeru, rdma)("Write metadata 0x%lx , size 0x%lx to Memory Server", (size_t)mc->bottom() , (size_t)(mc->word_size() << 3) );
-    //syscall(RDMA_WRITE, (char *)mc->bottom(), ((unsigned long long)(mc->word_size()))<<3);
     pair_num++;
   }
 
@@ -265,8 +263,6 @@ void SpaceManager::send_metadata(AddrPair* addrpair, int& pair_num) {
     addrpair[pair_num].st = (char *)mc->bottom();
     addrpair[pair_num].ed = (char *)(mc->bottom()+mc->word_size());
     pair_num++;
-		// log_debug(semeru, rdma)("Write metadata 0x%lx , size 0x%lx to Memory Server", (size_t)mc->bottom() , (size_t)(mc->word_size() << 3) );
-    // syscall(RDMA_WRITE, (char *)mc->bottom(), ((unsigned long long)(mc->word_size()))<<3);
   }
   _last_sent_chunk = _current_chunk;
   _last_top = _current_chunk->top();

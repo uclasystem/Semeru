@@ -5,6 +5,7 @@
 //
 // Define global variables
 struct context *global_rdma_ctx = NULL;					// The RDMA controll context.
+int rdma_queue_count = 0;
 //struct rdma_mem_pool* global_mem_pool = NULL;
 
 //
@@ -39,7 +40,7 @@ void* Build_rdma_to_cpu_server(void* _args ){
 	char* heap_start	= NULL;
 	size_t heap_size	=	0;
   const char* port_str  = cur_mem_server_port;
-  const char* ip_str    = cur_mem_server_ip; // defined in globalDefinitions.hpp
+  const char* ip_str    = cur_mem_server_ip;
 
 	// Parse the paramters
 	struct rdma_main_thread_args *args = (struct rdma_main_thread_args *) _args;
@@ -70,22 +71,21 @@ void* Build_rdma_to_cpu_server(void* _args ){
   guarantee(rdma_listen(listener, 10) == 0, "rdma_listen failed,return non-zero"); 						/* backlog=10 is arbitrary */
   port = ntohs(rdma_get_src_port(listener));
 
-  tty->print("listening on %s::%d.\n", ip_str, port);
+  tty->print("listening on port %d.\n", port);
 
-  //
-  // [?] 1) How to bind the global_rdma_ctx with these created rdma_cm_id, rdma_event_channel ??
-  //     2) How to bind event->id with rdma_cm_id ?
 	// 
 	// Initialize the whole heap as RDMA buffer. 	
 	//	In our design, we map the whole Java heap RDMA buffer directly.
 	//
-  global_rdma_ctx = (struct context *)malloc(sizeof(struct context));
+  global_rdma_ctx = (struct context *)calloc(1, sizeof(struct context));
+  global_rdma_ctx->rdma_queues = (struct semeru_rdma_queue *)calloc(RDMA_QUEUE_NUM, sizeof(struct semeru_rdma_queue) );
+  global_rdma_ctx->connected = 0; // a global connect state.  enable in fucntion on_connection()
+  global_rdma_ctx->server_state = S_WAIT;
 	init_memory_pool(heap_start, heap_size, global_rdma_ctx);
 
-  //
-  // [?] Not like kernel level client running in a notify mode, here has to poll the cm event manually ?
+  
+  // poll the cm event explicitly
   //	Current process stops here to wait for RDMA signal. 
-	//
   while (rdma_get_cm_event(ec, &event) == 0) {    // Get a 2-sided RDMA message from Event Channel ?
     struct rdma_cm_event event_copy;
 
@@ -121,7 +121,7 @@ void* Build_rdma_to_cpu_server(void* _args ){
 void init_memory_pool(char* heap_start, size_t heap_size, struct context* rdma_ctx ){
 
 	int i;
-	rdma_ctx->mem_pool = (struct rdma_mem_pool* )malloc(sizeof(struct rdma_mem_pool));
+	rdma_ctx->mem_pool = (struct rdma_mem_pool* )calloc(1, sizeof(struct rdma_mem_pool));
 
 	#ifdef DEBUG_RDMA_SERVER
 	  // heap size should be in GB granularity.
@@ -182,7 +182,7 @@ void init_memory_pool(char* heap_start, size_t heap_size, struct context* rdma_c
 
 	return;
 
-	err:
+err:
 	tty->print("ERROR in %s \n", __func__);
 }
 
@@ -202,6 +202,7 @@ void init_memory_pool(char* heap_start, size_t heap_size, struct context* rdma_c
  */
 int on_cm_event(struct rdma_cm_event *event){
   int r = 0;
+  struct semeru_rdma_queue *rdma_queue = (struct semeru_rdma_queue *)event->id->context; // if we pass on_connect_request, we can get a null queue.
 
   if (event->event == RDMA_CM_EVENT_CONNECT_REQUEST){    // 1) ACCEPT the RDMA conenct request from client.
 
@@ -209,14 +210,14 @@ int on_cm_event(struct rdma_cm_event *event){
     tty->print("Get RDMA_CM_EVENT_CONNECT_REQUEST \n");
     #endif
 
-    r = on_connect_request(event->id);                  //    event->id : rdma_cm_id 
+    r = on_connect_request(event->id);                    //    event->id : rdma_cm_id 
   }else if (event->event == RDMA_CM_EVENT_ESTABLISHED){   // 2) After ACCEPT the connect request, server will get a RDMA_CM_EVENT_ESTABLISHED ack?
     
     #ifdef DEBUG_RDMA_SERVER
     tty->print("Get RDMA_CM_EVENT_ESTABLISHED \n");
     #endif
     
-    r = rdma_connected(event->id);                       //    send the free memory to client size of current server.
+    r = rdma_connected(rdma_queue);                       //    send the free memory to client size of current server.
 
   }else if (event->event == RDMA_CM_EVENT_DISCONNECTED){
 
@@ -224,7 +225,7 @@ int on_cm_event(struct rdma_cm_event *event){
     tty->print("Get RDMA_CM_EVENT_DISCONNECTED \n");
     #endif
 
-    r = on_disconnect(event->id);
+    r = on_disconnect(rdma_queue);
   }else{
     die("on_cm_event: unknown event.");
   }
@@ -245,12 +246,20 @@ int on_cm_event(struct rdma_cm_event *event){
 int on_connect_request(struct rdma_cm_id *id)
 {
   struct rdma_conn_param cm_params;
+  struct semeru_rdma_queue *rdma_queue;
 
-  tty->print("%s, received connection request.\n", __func__);
-  build_connection(id);					// Build the RDMA connection. Post a receive wr here.
+  rdma_queue = &(global_rdma_ctx->rdma_queues[rdma_queue_count++]);  // rdma_queue_count is a global counter
+  rdma_queue->q_index = rdma_queue_count - 1;
+  rdma_queue->cm_id = id;  // get the rdma_cm_id for this queue.
+
+  tty->print("%s, rdma_queue[%d] received connection request.\n", __func__, rdma_queue_count -1);
+  build_connection(rdma_queue);					// Build the RDMA connection. Post a receive wr here.
   build_params(&cm_params);			// [?] Set some RDMA paramters. 
   TEST_NZ(rdma_accept(id, &cm_params));  // ACCEPT the request to build RDMA connection.
-  tty->print("%s, Send ACCEPT back to CPU server \n", __func__);
+
+  rdma_queue->connected = 1;
+
+  tty->print("%s, rdma_queue[%d] sends ACCEPT back to CPU server \n", __func__, rdma_queue_count -1);
 
   return 0;
 }
@@ -272,59 +281,26 @@ int on_connect_request(struct rdma_cm_id *id)
  * 		
  * 		Build RDMA connection by using the global global_rdma_ctx.
  */
-void build_connection(struct rdma_cm_id *id){
+void build_connection(struct semeru_rdma_queue * rdma_queue){
   int i;
   //struct connection *conn;
   struct ibv_qp_init_attr qp_attr;
 
   // 1) build a listening daemon thread 
-  build_context(id->verbs);  // create a daemon thread, poll_cq
-  build_qp_attr(&qp_attr);   // Initialize qp_attr
+  get_device_info(rdma_queue);  // create a daemon thread, poll_cq
+  build_qp_attr(rdma_queue, &qp_attr);   // Initialize qp_attr
 
-  TEST_NZ(rdma_create_qp(id, global_rdma_ctx->pd, &qp_attr));   // Build the QP.
+  TEST_NZ(rdma_create_qp(rdma_queue->cm_id, global_rdma_ctx->rdma_dev->pd, &qp_attr));   // Build the QP.
+  rdma_queue->qp = rdma_queue->cm_id->qp;
 
   // 2) Build the acknowledge RDMA packages.
-  //id->context = conn = (struct connection *)malloc(sizeof(struct connection));
-  id->context = global_rdma_ctx;  // Assign self-defined context to rdma_cm_id->context. Then we can get it from wc->wr_id.
+  rdma_queue->cm_id->context = rdma_queue;  // Assign self-defined context to rdma_cm_id->context. Then we can get it from wc->wr_id.
+  rdma_queue->rdma_session = global_rdma_ctx;
 
-  global_rdma_ctx->id = id;
-  global_rdma_ctx->qp = id->qp;
-
-  global_rdma_ctx->send_state = SS_INIT;    // [?] Do ever use these states ?
-  global_rdma_ctx->recv_state = RS_INIT;
-  global_rdma_ctx->server_state = S_WAIT;
-
-  global_rdma_ctx->connected = 0;
-// 	atomic_init(&global_rdma_ctx->cq_qp_state);
-//  atomic_set(&global_rdma_ctx->cq_qp_state, CQ_QP_BUSY);  // [?] Need to set it idle, after the connection is built
- // global_rdma_ctx->free_mem_gb = 0;
-
-//  sem_init(&global_rdma_ctx->stop_sem, 0, 0);
- // sem_init(&global_rdma_ctx->evict_sem, 0, 0);
-  //global_rdma_ctx->sess = &session;
-
-  //for (i = 0; i < MAX_FREE_MEM_GB; i++){
-  //  conn->sess_chunk_map[i] = -1;
-  //}
-
-	// global_rdma_ctx->mapped_chunk_size = 0;
-
-  //add to session 
-  // for (i=0; i<MAX_CLIENT; i++){
-  //   if (session.conns_state[i] == CONN_IDLE){
-  //     session.conns[i] = conn;
-  //     session.conns_state[i] = CONN_CONNECTED;    // Mark this session connected ? before do the RDMA connection ?
-  //     conn->conn_index = i;
-  //     break;
-  //   } 
-  // }
-  //session.conn_num += 1;
-
-  register_rdma_comm_buffer(global_rdma_ctx);  // Register RDMA message memory regions, recv/send.
 
   // Send a waiting receive WR.
   // Post the receive wr before ACCEPT the RDMA connection.
-  post_receives(global_rdma_ctx);    
+  //post_receives(rdma_queue);    
 }
 
 
@@ -340,57 +316,59 @@ void build_connection(struct rdma_cm_id *id){
  * 		ibv_context : rdma_cm_id->verbs, IB hardware descriptor.
  * 		
  */
-void build_context(struct ibv_context *verbs)  // rdma_cm_id->verbs
+void get_device_info(struct semeru_rdma_queue * rdma_queue)  // rdma_cm_id->verbs
 {
 
-  // if (global_rdma_ctx) {  		// Confirm this is the first time to initialize global_rdma_ctx.
-  //   if (global_rdma_ctx->ctx != verbs)
-  //     die("cannot handle events in more than one context.");
 
-  //   return;
-  // }
+  // For multiple QP, only need to initialize global_rdma_ctx->rdma_dev once.
+  if(global_rdma_ctx->rdma_dev == NULL){
+    global_rdma_ctx->rdma_dev = (struct semeru_rdma_dev *)calloc(1, sizeof(struct semeru_rdma_dev));
+    global_rdma_ctx->rdma_dev->ctx = rdma_queue->cm_id->verbs;    // Use the ibv_context of the first rdma_queue.
 
-  //
-  //  [!!] Have to malloc its instance ealier, in Main function.
-  //global_rdma_ctx = (struct context *)malloc(sizeof(struct context));
+    TEST_Z(global_rdma_ctx->rdma_dev->pd = ibv_alloc_pd(rdma_queue->cm_id->verbs));   // global
+    TEST_Z(global_rdma_ctx->comp_channel = ibv_create_comp_channel(rdma_queue->cm_id->verbs));
 
-  global_rdma_ctx->ctx = verbs;   // struct context->ibv_context.
-  TEST_Z(global_rdma_ctx->pd = ibv_alloc_pd(global_rdma_ctx->ctx));
-  TEST_Z(global_rdma_ctx->comp_channel = ibv_create_comp_channel(global_rdma_ctx->ctx));
 
-	// Parameters of ibv_create_cq :
-	//		struct ibv_context *context, 	// IB hardware context, 
-	//		int cqe,  										// Number of Completion Queue Entries, then we can  poll WC from the cq. [?] We poll CQ one by one?
-	//		void *cq_context, 						// NULL, 
-	//		struct ibv_comp_channel *channel, 	
-	//		int comp_vector								// 0,
-	//
-  TEST_Z(global_rdma_ctx->cq = ibv_create_cq(global_rdma_ctx->ctx, 10, NULL, global_rdma_ctx->comp_channel, 0)); /* cqe=10 is arbitrary */
-  TEST_NZ(ibv_req_notify_cq(global_rdma_ctx->cq, 0));			// , solicited_only == 0, means give a notification for any WC.
+	  // Parameters of ibv_create_cq :
+	  //		struct ibv_context *context, 	// IB hardware context, 
+	  //		int cqe,  										// Number of Completion Queue Entries, then we can  poll WC from the cq. [?] We poll CQ one by one?
+	  //		void *cq_context, 						// NULL, 
+	  //		struct ibv_comp_channel *channel, 	
+	  //		int comp_vector								// 0,
+	  //
+    TEST_Z(rdma_queue->cq = ibv_create_cq(rdma_queue->cm_id->verbs, 10, NULL, global_rdma_ctx->comp_channel, 0)); /* cqe=10 is arbitrary */
+    TEST_NZ(ibv_req_notify_cq(rdma_queue->cq, 0));			// , solicited_only == 0, means give a notification for any WC.
 
-	// Thread : global_rdma_ctx->cq_poller_thread,
-	// Thread attributes : NULL
-	// Thread main routine : poll_cq(void *), 
-	// Thread parametes : NULL
-	//	[?] How to Start and Quit the execution of this method ?  
-	//
-  TEST_NZ(pthread_create(&global_rdma_ctx->cq_poller_thread, NULL, poll_cq, NULL));  // [?] Busy polling. 
+	  // Thread : global_rdma_ctx->cq_poller_thread,
+	  // Thread attributes : NULL
+	  // Thread main routine : poll_cq(void *), 
+	  // Thread parametes : NULL
+	  //	[?] Works for ? the rdma_queue[0] ? 
+	  //
+    TEST_NZ(pthread_create(&global_rdma_ctx->cq_poller_thread, NULL, poll_cq, NULL));  // [?] Busy polling. 
+
+    // Got device info, e.g. pd, debice, we can register rdma buffer now.
+    register_rdma_comm_buffer(global_rdma_ctx);  // Reserve 2-sided RDMA message memory regions, recv/send.
+
+  }
+
+ 
 }
 
 
 /**
  * Build qp based on global_RDMA_context.
  */
-void build_qp_attr(struct ibv_qp_init_attr *qp_attr)
+void build_qp_attr(struct semeru_rdma_queue * rdma_queue, struct ibv_qp_init_attr *qp_attr)
 {
   memset(qp_attr, 0, sizeof(*qp_attr));
 
-  qp_attr->send_cq = global_rdma_ctx->cq;  // Both Send/Recv queue share the same cq.
-  qp_attr->recv_cq = global_rdma_ctx->cq;
+  qp_attr->send_cq = rdma_queue->cq;  // Only the first rdma_queue has a solid cq. Other are NULL.
+  qp_attr->recv_cq = rdma_queue->cq;
   qp_attr->qp_type = IBV_QPT_RC;		// QP type, Reliable Communication.
 
-  qp_attr->cap.max_send_wr = 10;
-  qp_attr->cap.max_recv_wr = 100; //original 10  ??
+  qp_attr->cap.max_send_wr = 16;
+  qp_attr->cap.max_recv_wr = 16;
   qp_attr->cap.max_send_sge = MAX_REQUEST_SGL;    // enable  the scatter/gather
   qp_attr->cap.max_recv_sge = MAX_REQUEST_SGL;
 }
@@ -429,45 +407,46 @@ void * poll_cq(void *ctx)
  *  a. DMA buffer, user level.
  *      context->send_msg/recv_msg 
  */
-void register_rdma_comm_buffer(struct context *rdma_ctx)
-{
-  rdma_ctx->send_msg = (struct message *)malloc(sizeof(struct message));   // 2-sided RDMA messages
-  rdma_ctx->recv_msg = (struct message *)malloc(sizeof(struct message));
+void register_rdma_comm_buffer(struct context *rdma_session){
+  rdma_session->send_msg = (struct message *)calloc(1, sizeof(struct message));   // 2-sided RDMA messages
+  rdma_session->recv_msg = (struct message *)calloc(1, sizeof(struct message));
 
 	// [?] Is the the 1-sided RDMA buffer ?
-  TEST_Z(rdma_ctx->send_mr = ibv_reg_mr(
-    rdma_ctx->pd, 						// protect domain 
-    rdma_ctx->send_msg, 			// start address
+  TEST_Z(rdma_session->send_mr = ibv_reg_mr(
+    rdma_session->rdma_dev->pd, 						// protect domain 
+    rdma_session->send_msg, 			// start address
     sizeof(struct message),   // Register the send_msg/recv_msg as 1-sided RDMA buffer.
     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ));
 
-  TEST_Z(rdma_ctx->recv_mr = ibv_reg_mr(
-    rdma_ctx->pd, 
-    rdma_ctx->recv_msg, 
-    sizeof(struct message),   //
+  TEST_Z(rdma_session->recv_mr = ibv_reg_mr(
+    rdma_session->rdma_dev->pd, 
+    rdma_session->recv_msg, 
+    sizeof(struct message),  
     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ));
 
+  tty->print("%s, Reserve 2-sided rdma buffer done.\n", __func__);
 }
 
 /**
  * Post a receive WR to wait for RDMA message.
  *    This is an empty receive WR, waiting for the data sent from client.
  */
-void post_receives(struct context *rdma_ctx)
-{
+void post_receives(struct semeru_rdma_queue *rdma_queue){
+
   struct ibv_recv_wr wr, *bad_wr = NULL;
   struct ibv_sge sge;
+  struct context *rdma_session = rdma_queue->rdma_session;
 
-  wr.wr_id    = (uintptr_t)rdma_ctx;
+  wr.wr_id    = (uintptr_t)rdma_queue;
   wr.next     = NULL;
   wr.sg_list  = &sge;
   wr.num_sge  = 1;					// [?] Why does the number of sge for each WR is always 1 ??
 
-  sge.addr    = (uintptr_t)rdma_ctx->recv_msg;   // Put a recv_wr to wait for 2-sided RDMA message.
+  sge.addr    = (uintptr_t)rdma_session->recv_msg;   // Put a recv_wr to wait for 2-sided RDMA message.
   sge.length  = (uint32_t)sizeof(struct message);
-  sge.lkey    = rdma_ctx->recv_mr->lkey;         // For message receive, use the lkey of receive RDMA MR. 
+  sge.lkey    = rdma_session->recv_mr->lkey;         // For message receive, use the lkey of receive RDMA MR. 
 
-  TEST_NZ(ibv_post_recv(rdma_ctx->qp, &wr, &bad_wr)); // post a recv wait for WR.
+  TEST_NZ(ibv_post_recv(rdma_queue->qp, &wr, &bad_wr)); // post a recv wait for WR.
 }
 
 
@@ -506,72 +485,55 @@ void build_params(struct rdma_conn_param *params)
  * [?] What's the message sequence between cm_event and the CQ notify ?
  *  Is there any orders between  the CM_event and wr ?
  * 
- * Guess
- * 1) CM_even is only used for building the RDMA conenction.
- * 2) After the RDMA conenction is built, use CQ to receive data, wr.  
+ * Warning:
+ *  Only rdma_queue[0] has an online CQ. 
+ *  The CPU has to query all the information via the rdma_queue[0].
  * 
  */
 void handle_cqe(struct ibv_wc *wc){
 
   // wc->wr_id is a reserved viod* pointer for any self-attached context.
   // context->recv_msg is the binded DMA buffer.
-  //
-  struct context *rdma_ctx = (struct context *)(uintptr_t)wc->wr_id;
+  struct semeru_rdma_queue * rdma_queue = (struct semeru_rdma_queue *)(uintptr_t)wc->wr_id;
+  struct context *rdma_session = rdma_queue->rdma_session;
 
   if (wc->status != IBV_WC_SUCCESS)
     die("handle_cqe: status is not IBV_WC_SUCCESS.");
 
   if (wc->opcode == IBV_WC_RECV){         // Recv
-    switch (rdma_ctx->recv_msg->type){    // Check the DMA buffer of recevei WR.
+    switch (rdma_session->recv_msg->type){    // Check the DMA buffer of recevei WR.
       case QUERY:
         tty->print("%s, QUERY \n", __func__);
-        //atomic_set(&rdma_ctx->cq_qp_state, CQ_QP_BUSY);
-        send_free_mem_size(rdma_ctx);				//[!] This is the first time send the FREE SIZE information
-        post_receives(rdma_ctx);            // post a recv_wr for receiving.
+        send_free_mem_size(rdma_queue);				// Inform cpu server the available memory size
+        post_receives(rdma_queue);            // post a recv_wr for receiving.
         break;
+
       case REQUEST_CHUNKS:          //client requests for multiple memory chunks from current server.
         tty->print("%s, REQUEST_CHUNKS, Send available Regions to CPU server \n", __func__);
-        //atomic_set(&rdma_ctx->cq_qp_state, CQ_QP_BUSY);
         // Send all the available Regions to CPU
-        rdma_ctx->server_state = S_BIND;
-				send_regions(rdma_ctx);
+        rdma_session->server_state = S_BIND;
+				send_regions(rdma_queue);
         // post a recv wr to wait for responds.
-        post_receives(rdma_ctx);
-
-        //allocate n chunks, and send to client
-      //  send_chunks_to_client(rdma_ctx, rdma_ctx->recv_msg->size_gb);
-      //  session.conns_state[rdma_ctx->conn_index] = CONN_MAPPED;
-      //  post_receives(rdma_ctx);
+        post_receives(rdma_queue);
         break;
+
       case REQUEST_SINGLE_CHUNK:    // client requests for single memory chunk from this server. Usually used for debuging.
-
-        tty->print("%s, BIND_SINGLE, Send a single Region to CPU server\n", __func__);
-        //atomic_set(&rdma_ctx->cq_qp_state, CQ_QP_BUSY);
-        rdma_ctx->server_state = S_BIND;
-        //allocate n chunks, and send to client
-      //  send_single_chunk_to_client(conn, conn->recv_msg->size_gb); // [?]  2nd parameter should be, int client_chunk_index ??
-      //  session.conns_state[conn->conn_index] = CONN_MAPPED;  // [?] The connection->conn_index is the index of the chunk to be mapped ??
-      //  post_receives(conn);
-        break;
       case ACTIVITY:
-        tty->print("%s, ACTIVITY \n", __func__);
-        //copy bitmap data
-      //  sem_post(&conn->evict_sem);
-        break; 
       case DONE:
-        tty->print("%s, DONE \n", __func__);
-        //atomic_set(&rdma_ctx->cq_qp_state, CQ_QP_BUSY);
-      //  recv_done(conn); //post receive inside
+        tty->print("%s, REQUEST_SINGLE_CHUNK, ACTIVITY, DONE : TO BE DONE \n", __func__);
+
         break;
+
       default:
-        die("unknow received message\n");
+        tty->print("Recived error message type : %d \n",rdma_session->recv_msg->type);
+        die("unknow received message type\n");
     }
+
+  }else if(wc->opcode == IBV_WC_SEND){
+    	tty->print("%s, 2-sided RDMA message sent done ? \n",__func__);
+
   }else{ 
-			//Send a RDMA message ? 
-			#ifdef DEBUG_RDMA_SERVER
-			tty->print("%s, Send a RDMA message done. \n",__func__);
-			#endif
-      //atomic_set(&rdma_ctx->cq_qp_state, CQ_QP_IDLE);
+		tty->print("%s, recived wc.opcode %d \n",__func__, wc->opcode);
 		
   }
 }
@@ -594,99 +556,103 @@ void handle_cqe(struct ibv_wc *wc){
  * 		All the Memory servers expand at the same time and at same ratio. 
  * 		After expantion, Memory server to register all the newaly allocated Regions to CPU server.
  */
-int rdma_connected(struct rdma_cm_id *id){
+int rdma_connected( struct semeru_rdma_queue * rdma_queue){
 	int i;
+  int ret = 0;
   bool succ = true;
 
   // RDMA connection is build.
-	struct context* rdma_ctx = (struct context*)id->context;
-	rdma_ctx->connected = 1;
-	tty->print("%s, connection build. Register heap as RDMA buffer.\n", __func__);
+	struct context* rdma_session = (struct context*)rdma_queue->rdma_session;
 
-	// Register the RDMA buffer here
-	// We need to send the registered virtual address to CPU server in "send_free_mem_size"
-	// [?] Can we just register the whole heap once ?
-	// Or we have to register the Java heap in a Region granularity. 
+  // Only allocate the RDMA buffer once is good enough.
+  if(rdma_session->connected == 0){
 
+	  rdma_session->connected = 1;
+	  tty->print("%s, connection build. Register heap as RDMA buffer.\n", __func__);
 
 
+    // Waiting for all the RDMA buffer are COMMITED by the JVM initialization procerue. 
+    // WARNING : if notify_all() is earlier than the wait, will this thread continue directly
+    // {
+    //   MutexLockerEx x(SemeruRDMA_lock, Mutex::_no_safepoint_check_flag);
+    //   log_debug(semeru,rdma)("%s, waiting for committing all the RDMA buffer by the JVM initializaiton procesure..",__func__);
+   //   SemeruRDMA_lock->wait(Mutex::_no_safepoint_check_flag);
+    //   log_debug(semeru,rdma)("%s, Waken up, continure registering RDMA buffer..",__func__);
+    // }
 
+	  // Choice #1, register the whole Java heap.
+	  // rdma_session->mem_pool->Java_heap_mr = ibv_reg_mr(rdma_session->rdma_dev->pd, rdma_session->mem_pool->Java_start,rdma_session->mem_pool->size_gb*ONE_GB,
+	  // 																																														IBV_ACCESS_LOCAL_WRITE | 
+    //                                                                                             IBV_ACCESS_REMOTE_WRITE | 
+    //                                                                                             IBV_ACCESS_REMOTE_READ);
 
-  // Waiting for all the RDMA buffer are COMMITED by the JVM initialization procerue. 
-  // WARNING : if notify_all() is earlier than the wait, will this thread continue directly
-  // {
-  //   MutexLockerEx x(SemeruRDMA_lock, Mutex::_no_safepoint_check_flag);
-  //   log_debug(semeru,rdma)("%s, waiting for committing all the RDMA buffer by the JVM initializaiton procesure..",__func__);
-  //   SemeruRDMA_lock->wait(Mutex::_no_safepoint_check_flag);
-  //   log_debug(semeru,rdma)("%s, Waken up, continure registering RDMA buffer..",__func__);
-  // }
-
-	// Choice #1, register the whole Java heap.
-	// rdma_ctx->mem_pool->Java_heap_mr = ibv_reg_mr(rdma_ctx->pd, rdma_ctx->mem_pool->Java_start,rdma_ctx->mem_pool->size_gb*ONE_GB,
-	// 																																														IBV_ACCESS_LOCAL_WRITE | 
-  //                                                                                             IBV_ACCESS_REMOTE_WRITE | 
-  //                                                                                             IBV_ACCESS_REMOTE_READ);
-
-	// Choice #2, register the Region one by one.
-  //  This design is easy to handle the Memory pool scale. 
-  // [XX] We need to COMMIT the whole space first, and then resiter them as RDMA buffer.
-  //      Or we will get BAD_ADDRESS error.
-	for(i=0; i< rdma_ctx->mem_pool->region_num; i++){
+	  // Choice #2, register the Region one by one.
+    //  This design is easy to handle the Memory pool scale. 
+    // [XX] We need to COMMIT the whole space first, and then resiter them as RDMA buffer.
+    //      Or we will get BAD_ADDRESS error.
+	  for(i=0; i< rdma_session->mem_pool->region_num; i++){
     
-		rdma_ctx->mem_pool->Java_heap_mr[i] = ibv_reg_mr(rdma_ctx->pd, 
-                                                    rdma_ctx->mem_pool->region_list[i], 
-                                                    (size_t)rdma_ctx->mem_pool->region_mapped_size[i],
+		  rdma_session->mem_pool->Java_heap_mr[i] = ibv_reg_mr(rdma_session->rdma_dev->pd, 
+                                                    rdma_session->mem_pool->region_list[i], 
+                                                    (size_t)rdma_session->mem_pool->region_mapped_size[i],
 	 																									IBV_ACCESS_LOCAL_WRITE  | 
                                                     IBV_ACCESS_REMOTE_WRITE | 
                                                     IBV_ACCESS_REMOTE_READ);
   
-    #ifdef DEBUG_RDMA_SERVER
-    if (rdma_ctx->mem_pool->Java_heap_mr[i]!= NULL){
-      tty->print("Register Region[%d] : 0x%llx to RDMA Buffer[%d] : 0x%llx, rkey: 0x%llx, mapped_size 0x%lx done \n", i, 
-                                                            (unsigned long long)rdma_ctx->mem_pool->region_list[i],
+      #ifdef DEBUG_RDMA_SERVER
+      if (rdma_session->mem_pool->Java_heap_mr[i]!= NULL){
+        tty->print("Register Region[%d] : 0x%llx to RDMA Buffer[%d] : 0x%llx, rkey: 0x%llx, mapped_size 0x%lx done \n", i, 
+                                                            (unsigned long long)rdma_session->mem_pool->region_list[i],
                                                             i, 
-                                                            (unsigned long long)rdma_ctx->mem_pool->Java_heap_mr[i],
-                                                            (unsigned long long)rdma_ctx->mem_pool->Java_heap_mr[i]->rkey,
-                                                            (unsigned long)rdma_ctx->mem_pool->region_mapped_size[i]);
-    }else{
-      tty->print("%s, region[%d], 0x%lx is registered wrongly, with NULL. \n",__func__, 
+                                                            (unsigned long long)rdma_session->mem_pool->Java_heap_mr[i],
+                                                            (unsigned long long)rdma_session->mem_pool->Java_heap_mr[i]->rkey,
+                                                            (unsigned long)rdma_session->mem_pool->region_mapped_size[i]);
+      }else{
+        tty->print("%s, region[%d], 0x%lx is registered wrongly, with NULL. \n",__func__, 
                                                                               i,
-                                                                              (size_t)rdma_ctx->mem_pool->region_list[i]);
-      tty->print("ERROR in %s, %s\n",__func__, strerror(errno));
-      succ = false;  // For debug.
+                                                                              (size_t)rdma_session->mem_pool->region_list[i]);
+        tty->print("ERROR in %s, %s\n",__func__, strerror(errno));
+        succ = false;  // For debug.
+      }
+      #endif
+
     }
-    #endif
 
-  }
+    if(succ == false)
+      goto err;
 
-  if(succ == false)
-    goto err;
+  }// End of RDMA buffer registeration
 
+  
+  // Register RDMA buffer done.
+  // Inform each QP of CPU server, they can start QUERY now.
+  inform_memory_pool_available(rdma_queue);
+  post_receives(rdma_queue); 
 
-  // Send the available free size to CPU server to let it prepare necessary meta data.
-  //
-  send_free_mem_size(rdma_ctx);
-
-
-	// [?] Seems only Thread can use the MutexLockerEx. this is only a pthread.
-	// //
-	// // Synchronous with JVM
-	// // Time to wake up the JVM now.
-	// {
-  //   MutexLockerEx x(SemeruRDMA_lock, Mutex::_no_safepoint_check_flag);
-  //   log_debug(semeru,rdma)("%s, RDMA buffer registered and sent to CPU server. Wake up Concurrent Thread.",__func__);
-  //   SemeruRDMA_lock->notify_all();
-  // }
-
-
-
-  return 0;
 
 err:
-  tty->print("ERROR in %s.\n",__func__);
-
-  return -1;
+  return ret;
 }
+
+
+/** 
+ * Inform the CPU server, memory buffer is prepared for requesting.
+ * This is a per-QP information
+ */ 
+void inform_memory_pool_available(struct semeru_rdma_queue * rdma_queue){
+  
+  rdma_queue->rdma_session->send_msg->type = AVAILABLE_TO_QUERY;
+  tty->print("%s , rdma_queue [%d] Informa CPU server that memory server is prepared well for serving \n",  __func__, rdma_queue->q_index);
+  send_message(rdma_queue);
+
+}
+
+
+
+
+
+
+
 
 
 /**
@@ -699,21 +665,22 @@ err:
  *     So, we need to calculate these 2 part's committed memory separately.
  * 
  */
-void send_free_mem_size(struct context* rdma_ctx){
+void send_free_mem_size(struct semeru_rdma_queue * rdma_queue){
 	int i;
+  struct context * rdma_session = rdma_queue->rdma_session;
 
   // 1 Meta Region, N-1 Data Region
-  rdma_ctx->send_msg->mapped_chunk = rdma_ctx->mem_pool->region_num; // 1 meta data Region, N data Region
+  rdma_session->send_msg->mapped_chunk = rdma_session->mem_pool->region_num; // 1 meta data Region, N data Region
   
   // Only send the free Region number.
-	for(i=0; i<rdma_ctx->mem_pool->region_num; i++ ){
-		rdma_ctx->send_msg->buf[i]	= 0x0;
-		rdma_ctx->send_msg->rkey[i]	=	0x0;  // The contend tag of the RDMA message.
+	for(i=0; i<rdma_session->mem_pool->region_num; i++ ){
+		rdma_session->send_msg->buf[i]	= 0x0;
+		rdma_session->send_msg->rkey[i]	=	0x0;  // The contend tag of the RDMA message.
 	}
 
-  rdma_ctx->send_msg->type = FREE_SIZE;			// Need to modify the CPU server behavior.
-  tty->print("%s , Send free memory information to CPU server, %d Chunks \n", __func__, rdma_ctx->send_msg->mapped_chunk);
-  send_message(rdma_ctx);
+  rdma_session->send_msg->type = FREE_SIZE;			// Need to modify the CPU server behavior.
+  tty->print("%s , Send free memory information to CPU server, %d Chunks \n", __func__, rdma_session->send_msg->mapped_chunk);
+  send_message(rdma_queue);
 }
 
 
@@ -723,20 +690,22 @@ void send_free_mem_size(struct context* rdma_ctx){
  * 1) Send the registered RDMA buffer, ie the whole Jave heap for FREE_SIZE, to CPU server.
  * 2) [xx] No matter how many size is requested, send all the available spece to CPU server.
  */
-void send_regions(struct context* rdma_ctx){
+void send_regions(struct semeru_rdma_queue * rdma_queue){
 	int i;
+  struct context * rdma_session = rdma_queue->rdma_session;
+
 	// 1 meta Data Region, N-1 Data Regions.
-	rdma_ctx->send_msg->mapped_chunk = rdma_ctx->mem_pool->region_num; 
+	rdma_session->send_msg->mapped_chunk = rdma_session->mem_pool->region_num; 
 	
-	for(i=0; i<rdma_ctx->mem_pool->region_num; i++ ){
-		rdma_ctx->send_msg->buf[i]	= (uint64_t)rdma_ctx->mem_pool->Java_heap_mr[i]->addr;
-    rdma_ctx->send_msg->mapped_size[i]  = (uint64_t)rdma_ctx->mem_pool->region_mapped_size[i]; // count at bytes.
-		rdma_ctx->send_msg->rkey[i]	=	rdma_ctx->mem_pool->Java_heap_mr[i]->rkey;
+	for(i=0; i<rdma_session->mem_pool->region_num; i++ ){
+		rdma_session->send_msg->buf[i]	= (uint64_t)rdma_session->mem_pool->Java_heap_mr[i]->addr;
+    rdma_session->send_msg->mapped_size[i]  = (uint64_t)rdma_session->mem_pool->region_mapped_size[i]; // count at bytes.
+		rdma_session->send_msg->rkey[i]	=	rdma_session->mem_pool->Java_heap_mr[i]->rkey;
 	}
 
-  rdma_ctx->send_msg->type = SEND_CHUNKS;			// Need to modify the CPU server behavior.
-  tty->print("%s , Send registered Java heap to CPU server, %d chunks \n", __func__, rdma_ctx->send_msg->mapped_chunk);
-  send_message(rdma_ctx);
+  rdma_session->send_msg->type = SEND_CHUNKS;			// Need to modify the CPU server behavior.
+  tty->print("%s , Send registered Java heap to CPU server, %d chunks \n", __func__, rdma_session->send_msg->mapped_chunk);
+  send_message(rdma_queue);
 }
 
 
@@ -747,26 +716,27 @@ void send_regions(struct context* rdma_ctx){
  * 	Use the reserved,  context->send_msg, to send the 2-sided RDMA message.
  * 	Make sure the message data have been inserted into send_msg before invoking this function.
  */
-void send_message(struct context * rdma_ctx){
+void send_message(struct semeru_rdma_queue * rdma_queue){
   struct ibv_send_wr wr, *bad_wr = NULL;
   struct ibv_sge sge;
+  struct context *rdma_session = rdma_queue->rdma_session;
 
   memset(&wr, 0, sizeof(wr));
 
-  wr.wr_id = (uintptr_t)rdma_ctx;		// Attch the struct context as Self-defined context ? Wast too much bandwidth ?
+  wr.wr_id = (uintptr_t)rdma_queue;		// Attch the struct context as Self-defined context ? Wast too much bandwidth ?
   wr.opcode = IBV_WR_SEND;
   wr.sg_list = &sge;
   wr.num_sge = 1;
   wr.send_flags = IBV_SEND_SIGNALED;
 
-  sge.addr = (uintptr_t)rdma_ctx->send_msg;
+  sge.addr = (uintptr_t)rdma_session->send_msg;
   sge.length = (uint32_t)sizeof(struct message);
   tty->print("%s, message size = %lu\n", __func__, sizeof(struct message));
-  sge.lkey = rdma_ctx->send_mr->lkey;
+  sge.lkey = rdma_session->send_mr->lkey;
 
-  while (!rdma_ctx->connected);  // Wait until RDMA connection is built.
+  while (!rdma_session->connected);  // Wait until RDMA connection is built.
 
-  TEST_NZ(ibv_post_send(rdma_ctx->qp, &wr, &bad_wr));
+  TEST_NZ(ibv_post_send(rdma_queue->qp, &wr, &bad_wr));
 }
 
 
@@ -788,39 +758,50 @@ void send_message(struct context * rdma_ctx){
 //	If the JVM instance on CPU server exit, the Memory server has to exit, too.
 //
 
-int on_disconnect(struct rdma_cm_id *id)
-{
-  tty->print("%s, disconnect current RDMA connection.\n", __func__);
+/**
+ * Disconnect one rdma_queue 
+ */
+int on_disconnect(struct semeru_rdma_queue *rdma_queue){
+   
+   if(rdma_queue->connected == 1){
+    rdma_destroy_qp( rdma_queue->cm_id );
+    rdma_destroy_id( rdma_queue->cm_id );
+    tty->print("%s, free rdma_queue[%d] \n", __func__, rdma_queue->q_index);
+    rdma_queue->connected = 0;
 
-  destroy_connection((struct context*)id->context);
+    rdma_queue_count--;
+  }
+
+  if(rdma_queue_count == 0){
+    destroy_connection(rdma_queue->rdma_session);  // exit the JVM.
+  }
+
   return 0;
 }
 
 /**
  * Free this RDMA connection related resource.
  */
-void destroy_connection(struct context* rdma_ctx)
-{
+void destroy_connection(struct context * rdma_session){
 
   int i = 0;
   int index;
-  rdma_destroy_qp(rdma_ctx->id);
 
-  ibv_dereg_mr(rdma_ctx->send_mr);
-  ibv_dereg_mr(rdma_ctx->recv_mr);
-  free(rdma_ctx->send_msg);
-  free(rdma_ctx->recv_msg);
+  ibv_dereg_mr(rdma_session->send_mr);
+  ibv_dereg_mr(rdma_session->recv_mr);
+  free(rdma_session->send_msg);
+  free(rdma_session->recv_msg);
 
 	// All the Regions should be freed.
-  for (i=0; i<rdma_ctx->mem_pool->region_num; i++){
-    if (rdma_ctx->mem_pool->Java_heap_mr[i] == NULL) {
+  for (i=0; i<rdma_session->mem_pool->region_num; i++){
+    if (rdma_session->mem_pool->Java_heap_mr[i] == NULL) {
       continue;   // Not rereigser this Region for now.
     }
     
-		ibv_dereg_mr(rdma_ctx->mem_pool->Java_heap_mr[i]);
+		ibv_dereg_mr(rdma_session->mem_pool->Java_heap_mr[i]);
   }
 
-  rdma_destroy_id(rdma_ctx->id);
+  
 	//rdma_destroy_event_channel(ec);
 
 	// Free all the RDMA related context variables

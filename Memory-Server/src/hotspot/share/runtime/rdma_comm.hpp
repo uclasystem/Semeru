@@ -24,6 +24,7 @@
 #include <netinet/in.h>
 #include <pthread.h>
 #include <linux/kernel.h>
+#include <linux/wait.h>
 
 
 //	Memory server is developed in user space, so use user-space IB API.
@@ -35,7 +36,7 @@
 
 
 // Enable the debug information.
-#define DEBUG_RDMA_SERVER 		1
+//#define DEBUG_RDMA_SERVER 		1
 
 
 // Used for describing RDMA QP status.
@@ -44,6 +45,38 @@
 #define CQ_QP_BUSY 1
 #define CQ_QP_IDLE 0
 #define CQ_QP_DOWN 2
+
+
+
+#define RDMA_QUEUE_NUM  16  // Larger or equal to the online core of CPU server
+
+
+/**
+ * This memory server support multiple QP for each CPU.
+ * 
+ */
+struct semeru_rdma_queue {
+  // RDMA client ID, one for per QP.
+	struct rdma_cm_id *cm_id;		//  ? bind to QP
+
+	// ib events 
+  struct ibv_cq *cq;			// Completion queue
+	struct ibv_qp *qp;			// Queue Pair
+
+	//enum rdma_queue_state state;  // the current status of the QP.
+	//wait_queue_head_t 		sem;    // semaphore for wait/wakeup
+	uint8_t  	connected;			// some function can only be called once, this is the flag to record this.
+
+	int q_index;
+	struct context		*rdma_session;			// Record the RDMA session this queue belongs to.
+};
+
+
+struct semeru_rdma_dev {
+  struct ibv_context *ctx;  // Memory server only needs one CQ, use the CQ of rdma_queue[0].
+  struct ibv_pd *pd;
+};
+
 
 
 
@@ -77,19 +110,23 @@ enum region_status{
     RS_DONE_RECV
   };
 
+  // 2-sided RDMA message type
+  // Used to communicate with cpu servers.
 	enum message_type{
 		DONE = 1,				      // Start from 1
 		SEND_CHUNKS,				  // send the remote_addr/rkey of multiple Chunks. Used for send the extended Regions.
 		SEND_SINGLE_CHUNK,		// send the remote_addr/rkey of a single Chunk. Useless now.
 		FREE_SIZE,						// Send free size information && the registered whole Java heap to remote CPU server.
 		EVICT,        			  // 5
-		ACTIVITY,				      // Debug item, used as "End of STW Window "
-		
-		STOP,					        //7, upper SIGNALs are used by server, below SIGNALs are used by client.
 
+		ACTIVITY,				      // 6 Debug item, used as "End of STW Window "
+		STOP,					        // 7, upper SIGNALs are used by server, below SIGNALs are used by client.
 		REQUEST_CHUNKS,
 		REQUEST_SINGLE_CHUNK,	// Send a request to ask for a single chunk.
-		QUERY         			  // 10
+		QUERY,         			  // 10
+    
+    AVAILABLE_TO_QUERY    // This memory server is oneline to server.
+
 	};
 
 /**
@@ -114,59 +151,32 @@ struct message {
  */
 struct context {
 
-  struct ibv_context *ctx;	//  rdma_cm_id->verbs, ibv_context. used for IB driver, mellanox context
+  struct semeru_rdma_dev * rdma_dev;
+  struct semeru_rdma_queue * rdma_queues;
 
-  struct ibv_pd *pd;				// PD.
-  struct ibv_cq *cq;				// Completion Queue.
+
   struct ibv_comp_channel *comp_channel;
-	struct rdma_cm_id *id;			// cm_id ?
-  struct ibv_qp *qp;					// RDMA QP, get from rdma_cm_id->ib_qp.
-
   pthread_t cq_poller_thread;  // Deamon thread to handle the 2-sided RDMA messages.
 
- // struct rdma_session *sess;
- //  int conn_index;                      //conn index in sess->conns
- // int sess_chunk_map[MAX_MR_NUM_GB];     // Regions mapping status. -1 is unmapped, other stach follow region_status.
- // int mapped_chunk_size;
 
-//  sem_t evict_sem;
-//  sem_t stop_sem;
-
-
-  int connected;							
-
-// 2) Used for 2-sided RDMA communications
-//
-
-//  struct ibv_mr *rdma_remote_mr;  // [??] Used for 1-sided RDMA message ?
-
-//  struct ibv_mr peer_mr;
-
+  // 2) Reserve wr for 2-sided RDMA communications
+  //    
   struct message *recv_msg;				// RDMA commandline attached to each RDMA request.
 	struct ibv_mr *recv_mr;       	// Need to register recv_msg as RDMA MR, then RDMA device can read/write it.
 
   struct message *send_msg;
   struct ibv_mr *send_mr;
 
-// 3) Used for 1-sided RDMA communications
-//
 
- // char *rdma_remote_region;				
+  // 3) Used for 1-sided RDMA communications
+  //
   struct rdma_mem_pool* mem_pool;  // Manage the whole heap and Region, RDMA_MR information.
-
-//  struct atomic_t cq_qp_state;  	//[?] work as RDMA QP lock ?
-
-//  pthread_t free_mem_thread;
-//  long free_mem_gb;
-//  unsigned long rdma_buf_size;
+  int connected;    // global connection state, if any QP is connected to CPU server.
 
 	// In our design, the memory pool on Memory server will be exited also.
 	// Can't see benefits for reusing the Memory pool ? It also causes privacy problems. 
 	//
-
   server_states server_state;
-  send_states   send_state;
-  recv_states   recv_state;
 
 };
 
@@ -230,22 +240,23 @@ void die(const char *reason);
 void* Build_rdma_to_cpu_server(void* _args );
 int 	on_cm_event(struct rdma_cm_event *event);
 int 	on_connect_request(struct rdma_cm_id *id);
-int 	rdma_connected(struct rdma_cm_id *id);
-int 	on_disconnect(struct rdma_cm_id *id);
+int 	rdma_connected(struct semeru_rdma_queue* rdma_queue);
+int 	on_disconnect(struct semeru_rdma_queue * rdma_queue);
 
-void  build_connection(struct rdma_cm_id *id);
+void  build_connection(struct semeru_rdma_queue* rdma_queue);
 void  build_params(struct rdma_conn_param *params);
-void  build_context(struct ibv_context *verbs);
-void  build_qp_attr(struct ibv_qp_init_attr *qp_attr);
+void  get_device_info(struct semeru_rdma_queue * rdma_queue);
+void  build_qp_attr(struct semeru_rdma_queue * rdma_queue, struct ibv_qp_init_attr *qp_attr);
 void  handle_cqe(struct ibv_wc *wc);
 
-void  send_free_mem_size(struct context* rdma_ctx);
-void  send_regions(struct context* rdma_ctx);
-void  send_message(struct context * rdma_ctx);
+void  inform_memory_pool_available(struct semeru_rdma_queue * rdma_queue);
+void  send_free_mem_size(struct semeru_rdma_queue* rdma_queue);
+void  send_regions(struct semeru_rdma_queue* rdma_queue);
+void  send_message(struct semeru_rdma_queue * rdma_queue);
 
-void 	destroy_connection(struct context* rdma_ctx);
+void 	destroy_connection(struct context * rdma_session);
 void*	poll_cq(void *ctx);
-void 	post_receives(struct context *rdma_ctx);
+void 	post_receives(struct semeru_rdma_queue * rdma_queue);
 
 void 	init_memory_pool(char* heap_start, size_t heap_size, struct context * rdma_ctx );
 void 	register_rdma_comm_buffer(struct context *rdma_ctx);
@@ -270,6 +281,7 @@ void 	register_rdma_comm_buffer(struct context *rdma_ctx);
  * 
  */
 extern struct context *global_rdma_ctx;					// The RDMA controll context.
+extern int rdma_queue_count;
 //extern struct rdma_mem_pool* global_mem_pool;
 
 extern int errno ;

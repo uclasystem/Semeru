@@ -12,6 +12,29 @@
 #
 
 
+
+
+
+# obj-[m] means compile this module but not link it into kernel at startup.
+obj-m += semeru_cpu_server.o
+
+# a. the frontswap path
+semeru_cpu_server-y	:= semeru_cpu.o
+semeru_cpu_server-y	+= frontswap_ops.o
+semeru_cpu_server-y	+= frontswap_rdma.o
+semeru_cpu_server-y	+= local_dram.o
+
+# b. the block layer path
+#semeru_cpu_server-y := block_path_register_disk.o	# main entry
+#semeru_cpu_server-y += block_path_rdma.o	# merged into .so
+#semeru_cpu_server-y += local_block_device.o  # merged into .so
+
+
+
+
+
+
+
 #kernel_rdma_module_dir=/lib/modules/$(shell uname -r)/extra/semeru_cpu
 
 
@@ -19,28 +42,20 @@
 #NOSTDINC_FLAGS += -I/usr/src/ofa_kernel/default/include
 
 
+# If build agianst OFED, enable here && KBUILD_EXTRA_SYMBOLS="$(KSYMVERS)" 
 # The Modules.sysvers listed here will be copy to bulding directory
-KSYMVERS = /lib/modules/$(shell uname -r)/source/Module.symvers /usr/src/ofa_kernel/default/Module.symvers
-
-
-
-# obj-[m] means compile this module but not link it into kernel at startup.
-obj-m += semeru_cpu.o
-
-semeru_cpu-y	:= register_disk.o	# main entry
-semeru_cpu-y 	+= rdma_client.o	# merged into .so
-semeru_cpu-y  += local_block_device.o  # merged into .so
+#KSYMVERS := /usr/src/ofa_kernel/default/Module.symvers
 
 
 # Debug
 # Build the module separately
-all:
+#all:
 	# -C change to kernel source code, to use its Makefile 
-	#  M is a hythen, return to $(PWD) after rading the Make in /lib/modules/$(shell uname -r)/build
-	# make  -C /lib/modules/$(shell uname -r)/build  SUBDIRS=$(PWD)  KBUILD_EXTRA_SYMBOLS="$(KSYMVERS)"  modules
-	make  -C /lib/modules/$(shell uname -r)/build  M=$(PWD)  modules
-clean:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+	#  M is a hythen, return to $(PWD) after reading the Make in /lib/modules/$(shell uname -r)/build
+	# make  -C /lib/modules/$(shell uname -r)/build  M=$(PWD)  KBUILD_EXTRA_SYMBOLS="$(KSYMVERS)"  modules
+	#	make  -C /lib/modules/$(shell uname -r)/build  M=$(PWD)  modules
+#clean:
+#	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
 
 # install:
 # 	mkdir -p $(kernel_rdma_module_dir)
@@ -49,3 +64,30 @@ clean:
 # uninstall:
 # 	modprobe -r semeru_cpu
 # 	rm $(kernel_rdma_module_dir)/semeru_cpu.ko
+
+
+
+
+OFA_DIR ?= /usr/src/ofa_kernel/default
+OFA_INCLUDE := $(OFA_DIR)/include
+OFA_SYMVERS := $(OFA_DIR)/Module.symvers
+
+ifneq ($(LINUXINCLUDE),)
+# kbuild part of makefile
+
+LINUXINCLUDE := \
+  -I$(OFA_INCLUDE) \
+  ${LINUXINCLUDE}
+
+else
+# normal makefile
+
+export KBUILD_EXTRA_SYMBOLS=$(OFA_SYMVERS)
+KDIR ?= /lib/modules/`uname -r`/build
+
+default:
+	$(MAKE) -C $(KDIR) M=$$PWD
+
+clean:
+	$(MAKE) -C $(KDIR) M=$$PWD clean
+endif

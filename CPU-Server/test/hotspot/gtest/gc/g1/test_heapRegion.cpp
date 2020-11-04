@@ -50,6 +50,8 @@ public:
     return MinObjAlignment;
   }
 
+  void set_containing_obj(oop obj) {}
+
   void reset() {
     _count = 0;
   }

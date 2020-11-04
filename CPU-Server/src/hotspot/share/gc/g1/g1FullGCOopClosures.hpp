@@ -74,6 +74,30 @@ public:
   virtual void do_cld(ClassLoaderData* cld);
 };
 
+class G1AdjustClosureNew : public BasicOopIterateClosure {
+  //mhr: modify
+  oop              _containing_obj;
+  uint             _worker_id;
+  template <class T> inline void adjust_pointer(T* p);
+  //template <class T> static inline void adjust_pointer(T* p);
+public:
+  template <class T> void do_oop_work(T* p) { adjust_pointer(p); }
+  virtual void do_oop(oop* p);
+  virtual void do_oop(narrowOop* p);
+
+  virtual void set_containing_obj(oop obj) {
+    //tty->print("set containing obj: 0x%lx\n", (size_t)(HeapWord*)obj);
+    _containing_obj = obj;
+    //tty->print("set _containing_obj finish: 0x%lx\n", (size_t)(HeapWord*)_containing_obj);
+  }
+
+  void set_worker_id(uint worker_id) {
+    _worker_id = worker_id;
+  } 
+
+  virtual ReferenceIterationMode reference_iteration_mode() { return DO_FIELDS; }
+};
+
 class G1AdjustClosure : public BasicOopIterateClosure {
   template <class T> static inline void adjust_pointer(T* p);
 public:

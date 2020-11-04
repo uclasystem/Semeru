@@ -528,9 +528,14 @@ struct page *read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 	struct page *retpage = __read_swap_cache_async(entry, gfp_mask,
 			vma, addr, &page_was_allocated);		// 1) Cofirm the swp_entry has corresponding swapped page. && allocate physical page
 
-	if (page_was_allocated)
-		swap_readpage(retpage);   // 2) the page is allocated, read it.
+	// Not found in Swap Cache, do the swaping in
+	if (page_was_allocated){
+		#ifdef DEBUG_MODE_DETAIL
+			printk(KERN_INFO "%s, swap in page, virt 0x%lx , swap_entry offset 0x%lx \n", __func__, (size_t)addr, (size_t)swp_offset(entry) );
+		#endif
 
+		swap_readpage(retpage);   // 2) the page is allocated, read it.
+	}
 	return retpage;
 }
 
@@ -548,7 +553,9 @@ static unsigned long swapin_nr_pages(unsigned long offset)
 	unsigned int pages, max_pages, last_ra;
 	static atomic_t last_readahead_pages;
 
-	max_pages = 1 << READ_ONCE(page_cluster);
+	//max_pages = 1 << READ_ONCE(page_cluster);
+	
+	max_pages = 30;  // !! DEBUG !! match the IB S/G limit
 	if (max_pages <= 1)
 		return 1;
 

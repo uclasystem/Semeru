@@ -31,10 +31,11 @@
 // return the RDMA buffer address back
 //  
 // int : target memory server id
+// (write : int -> message type. 0 for data, 1 for signal )
 // char _user* 		: start addr
 // unsigned long 	: data size
 typedef char* (semeru_rdma_read)(int,  char __user * , unsigned long);
-typedef char* (semeru_rdma_write)(int, char __user * , unsigned long);
+typedef char* (semeru_rdma_write)(int, int, char __user * , unsigned long);
 
 
 
