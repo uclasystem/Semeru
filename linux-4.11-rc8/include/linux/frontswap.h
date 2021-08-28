@@ -15,6 +15,7 @@ struct frontswap_ops {
 	struct frontswap_ops *next; /* private pointer to next ops */
 };
 
+extern void frontswap_deregister_ops(void);
 extern void frontswap_register_ops(struct frontswap_ops *ops);
 extern void frontswap_shrink(unsigned long);
 extern unsigned long frontswap_curr_pages(void);

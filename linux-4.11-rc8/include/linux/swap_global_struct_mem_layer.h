@@ -21,10 +21,10 @@
 
 
 //#define SWAP_OUT_MONITOR_VADDR_START		(size_t)(SEMERU_START_ADDR+ RDMA_STRUCTURE_SPACE_SIZE)  // Start of Data Regions, 0x400,100,000,000
-#define SWAP_OUT_MONITOR_VADDR_START		(size_t)SEMERU_START_ADDR		// Start of Meta Region, 0x400,000,000,000
-#define SWAP_OUT_MONITOR_UNIT_LEN_LOG		26		 						 // 1<<26, recording granulairy is 64M per entry. The query can span multiple entries.
+#define SWAP_OUT_MONITOR_VADDR_START		(size_t)SEMERU_START_ADDR // Start of Meta Region, 0x400,000,000,000
+#define SWAP_OUT_MONITOR_UNIT_LEN_LOG		26 // 1<<26, recording granulairy is 64M per entry. The query can span multiple entries.
 #define SWAP_OUT_MONITOR_OFFSET_MASK		(u64)(~((1<<SWAP_OUT_MONITOR_UNIT_LEN_LOG) -1))		//0xfffffffff0000000
-#define SWAP_OUT_MONITOR_ARRAY_LEN			(u64)2*1024*1024	 //2M item, Coverred heap size: SWAP_OUT_MONITOR_ARRAY_LEN * (1<<SWAP_OUT_MONITOR_UNIT_LENG_LOG)
+#define SWAP_OUT_MONITOR_ARRAY_LEN		(u64)2*1024*1024 //2M item, Coverred heap size: SWAP_OUT_MONITOR_ARRAY_LEN * (1<<SWAP_OUT_MONITOR_UNIT_LENG_LOG)
 
 
 
@@ -35,7 +35,9 @@
 // ###################### Functions ######################
 //
 extern atomic_t on_demand_swapin_number;
+extern atomic_t prefetch_swapin_number;
 extern atomic_t hit_on_swap_cache_number;
+
 
 extern atomic_t jvm_region_swap_out_counter[]; // 4 bytes for each counter is good enough.
 
@@ -44,23 +46,33 @@ extern atomic_t jvm_region_swap_out_counter[]; // 4 bytes for each counter is go
 // Invoked in syscall sys_swap_stat_reset_and_check
 static inline void reset_swap_info(void){
 	atomic_set(&on_demand_swapin_number,0);
+	atomic_set(&prefetch_swapin_number, 0);
 	atomic_set(&hit_on_swap_cache_number,0);
 }
 
 // Multiple thread safe.
-static void on_demand_swapin_inc(void){
+static inline void on_demand_swapin_inc(void){
 	atomic_inc(&on_demand_swapin_number);
 }
 
-static void hit_on_swap_cache_inc(void){
+static inline void prefetch_swapin_inc(void){
+	atomic_inc(&prefetch_swapin_number);
+}
+
+
+static inline void hit_on_swap_cache_inc(void){
 	atomic_inc(&hit_on_swap_cache_number);
 }
 
-static int get_on_demand_swapin_number(void){
+static inline int get_on_demand_swapin_number(void){
 	return (int)atomic_read(&on_demand_swapin_number);
 }
 
-static int get_hit_on_swap_cache_number(void){
+static inline int get_prefetch_swapin_number(void){
+	return (int)atomic_read(&prefetch_swapin_number);
+}
+
+static inline int get_hit_on_swap_cache_number(void){
 	return (int)atomic_read(&hit_on_swap_cache_number);
 }
 
@@ -107,7 +119,7 @@ static inline u64 swap_out_pages_for_range(u64 start_vaddr, u64 end_vaddr){
 	u64 swap_out_total = 0;
 	u32 i;
 
-	#ifdef DEBUG_MODE_BRIEF
+	#if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
 	printk("%s, Get the swapped out pages for addr[0x%llx, 0x%llx), entry[0x%llx, 0x%llx] \n", __func__, 
 																															(u64)start_vaddr, (u64)end_vaddr,
 																															entry_start, entry_end);

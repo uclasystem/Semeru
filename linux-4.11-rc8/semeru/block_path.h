@@ -264,7 +264,7 @@ struct rmem_rdma_command{
 
 	struct ib_sge sge_list[MAX_REQUEST_SGL]; 	// scatter-gather entry for 1-sided RDMA read/write WR. 
 
-	#ifdef DEBUG_MODE_BRIEF
+	#if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
 		// Debug fields
 	// Control-Path, virtual address of source
 	// used for rdma read, write back data.

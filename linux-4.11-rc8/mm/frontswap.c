@@ -132,6 +132,13 @@ void frontswap_register_ops(struct frontswap_ops *ops)
 	for_each_set_bit(i, a, MAX_SWAPFILES)
 		ops->init(i);
 
+	//debug
+	if(atomic_read(&frontswap_enabled_key.key.enabled)){
+		pr_err("%s, Semeru doesn't allow registering multiple frontswap operations.", __func__);
+		pr_warn("%s, before registration, frontswap_enabled_key %d", 
+				__func__, atomic_read(&frontswap_enabled_key.key.enabled));
+	}
+
 	/*
 	 * Setting frontswap_ops must happen after the ops->init() calls
 	 * above; cmpxchg implies smp_mb() which will ensure the init is
@@ -142,6 +149,9 @@ void frontswap_register_ops(struct frontswap_ops *ops)
 	} while (cmpxchg(&frontswap_ops, ops->next, ops) != ops->next);
 
 	static_branch_inc(&frontswap_enabled_key);  // enable the frontswap path
+			
+	pr_warn("%s, Add frontswap ops 0x%lx to link list, current ops is 0x%lx. frontswap_enabled_key %d.", 
+				__func__, (size_t)ops, (size_t)frontswap_ops, atomic_read(&frontswap_enabled_key.key.enabled) );
 
 	spin_lock(&swap_lock);
 	plist_for_each_entry(si, &swap_active_head, list) {
@@ -166,6 +176,47 @@ void frontswap_register_ops(struct frontswap_ops *ops)
 	}
 }
 EXPORT_SYMBOL(frontswap_register_ops);
+
+
+/**
+ * Semeru - remove the old registered frontswap_ops
+ * Only alow one registered frontswap_ops.
+ * Remove the old one when the frontswap_enabled_key is larger than 1
+ * 
+ * This fucntion provide the function of removing the old registered frontswap_ops.
+ *  Warning : assume the  number of swap partitions are not changed during the deregistration procedure.
+ */
+void frontswap_deregister_ops(void)
+{
+	struct frontswap_ops *cur_op, *next_op;
+
+	while(frontswap_enabled()){ // check  the frontswap_enabled_key->key
+		// recheck  the status of the frontswap_ops link list
+		if(frontswap_ops == NULL){
+			static_branch_dec(&frontswap_enabled_key); 
+			pr_err("%s, frontswap_ops is already empty, dec frontswap_enabled_key to %d", 
+					__func__, atomic_read(&frontswap_enabled_key.key.enabled) );
+			continue; // skip the remove operation
+		}
+
+		// decrease and remove all the registered frontswap_ops
+		cur_op = frontswap_ops;
+		next_op = frontswap_ops->next;
+
+		pr_warn("%s, cur_ops 0x%lx, next_ops 0x%lx", __func__, (size_t)cur_op, (size_t)next_op);
+
+		// remove a node from the link list
+		if(cmpxchg(&frontswap_ops, cur_op, next_op) ==  cur_op){  // (ptr, old, new)
+			static_branch_dec(&frontswap_enabled_key); 	
+			//kfree(cur_ops); // how to free the unpluged module ?
+			
+			pr_warn("%s, removed frontswap ops 0x%lx from link list, current ops is 0x%lx. frontswap_enabled_key %d.", 
+				__func__, (size_t)cur_op, (size_t)frontswap_ops, atomic_read(&frontswap_enabled_key.key.enabled) );
+		}
+	}
+
+}
+EXPORT_SYMBOL(frontswap_deregister_ops);
 
 /*
  * Enable/disable frontswap writethrough (see above).

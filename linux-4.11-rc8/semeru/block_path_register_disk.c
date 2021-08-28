@@ -138,7 +138,7 @@ static int rmem_queue_rq(struct blk_mq_hw_ctx *hctx, const struct blk_mq_queue_d
   struct request *rq = bd->rq;
   
 
-  #ifdef DEBUG_MODE_BRIEF
+  #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
     u64 seg_num   = rq->nr_phys_segments;  // For swap bio, each segment should be 4K with 4K alignemtn. 
     u64 byte_len  = blk_rq_bytes(rq);       // request->_data_len, the sector size to be read/written.
     // struct bio      *bio_ptr;
@@ -209,7 +209,7 @@ static int rmem_queue_rq(struct blk_mq_hw_ctx *hctx, const struct blk_mq_queue_d
   // The NORMAL path : Connect to RDMA 
 
     cpu = get_cpu();  // disable cpu preempt
-    #ifdef DEBUG_MODE_BRIEF
+    #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
       printk(KERN_INFO "%s: get cpu %d for hardware queue %d \n",__func__, cpu, hctx->queue_num);
     #endif
   
@@ -229,7 +229,7 @@ static int rmem_queue_rq(struct blk_mq_hw_ctx *hctx, const struct blk_mq_queue_d
 
     // Transfer I/O request to 1-sided RDMA messages.
     internal_ret = transfer_requet_to_rdma_message(rdma_queue, rq);
-    #ifdef DEBUG_MODE_BRIEF
+    #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
     if(unlikely(internal_ret)){
       printk(KERN_ERR "%s, transfer_requet_to_rdma_message is failed. \n", __func__);
 			internal_ret = -1;
@@ -273,7 +273,7 @@ static int rmem_queue_rq(struct blk_mq_hw_ctx *hctx, const struct blk_mq_queue_d
 
 
     put_cpu();  // enable cpu preempt 
-    #ifdef DEBUG_MODE_BRIEF
+    #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
       printk(KERN_INFO "%s: put cpu %d for hardware queue 0x%x \n",__func__, cpu, hctx->queue_num);
     #endif
  
@@ -286,7 +286,7 @@ static int rmem_queue_rq(struct blk_mq_hw_ctx *hctx, const struct blk_mq_queue_d
   // i/o request is handled by disk driver successfully.
   return BLK_MQ_RQ_QUEUE_OK;
 
-#ifdef DEBUG_MODE_BRIEF
+#if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
 err:
 #endif
  
@@ -359,7 +359,7 @@ int transfer_requet_to_rdma_message(struct semeru_rdma_queue* rdma_queue, struct
   u64  start_chunk_index        = start_addr >> CHUNK_SHIFT;    // REGION_SIZE_GB/chunk in default.
   u64  offset_within_chunk      = start_addr & CHUNK_MASK;     // get the file address offset within chunk.
 
-  #ifdef DEBUG_MODE_BRIEF 
+  #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL) 
     u64  end_chunk_index          = (start_addr + bytes_len - 1) >> CHUNK_SHIFT;
     u64 debug_byte_len  = bytes_len;
 
@@ -418,7 +418,7 @@ int transfer_requet_to_rdma_message(struct semeru_rdma_queue* rdma_queue, struct
   start_chunk_index += 1; 
   remote_chunk_ptr  = &(rmda_session->remote_chunk_list.remote_chunk[start_chunk_index]);
 
-  #ifdef DEBUG_MODE_BRIEF
+  #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
   
   // printk("%s: TRANSFER TO RDMA MSG:  I/O request start_addr : 0x%llx, byte_length 0x%llx  --> \n ",__func__, start_addr, bytes_len);
 
@@ -444,7 +444,7 @@ int transfer_requet_to_rdma_message(struct semeru_rdma_queue* rdma_queue, struct
     // post a 1-sided RDMA write, Data-Path
     // Into RDMA section.
     ret = dp_post_rdma_write(rmda_session ,rq, rdma_queue, remote_chunk_ptr,  offset_within_chunk, bytes_len);
-    #ifdef DEBUG_MODE_BRIEF
+    #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
     if(unlikely(ret)){
       printk(KERN_ERR "%s, post 1-sided RDMA write failed. \n", __func__);
       goto err;
@@ -454,7 +454,7 @@ int transfer_requet_to_rdma_message(struct semeru_rdma_queue* rdma_queue, struct
   }else{
     // post a 1-sided RDMA read, Data-Path
     ret = dp_post_rdma_read(rmda_session, rq, rdma_queue, remote_chunk_ptr,  offset_within_chunk, bytes_len);
-    #ifdef DEBUG_MODE_BRIEF
+    #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
     if(unlikely(ret)){
       printk(KERN_ERR "%s, post 1-sided RDMA read failed. \n", __func__);
       goto err;
@@ -464,7 +464,7 @@ int transfer_requet_to_rdma_message(struct semeru_rdma_queue* rdma_queue, struct
   }
 
 
-  #ifdef DEBUG_MODE_BRIEF
+  #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
   err:
   #endif
 
@@ -529,7 +529,7 @@ static int init_blk_mq_tag_set(struct rmem_device_control* rmem_dev_ctrl){
     printk(KERN_ERR "%s, blk_mq_alloc_tag_set error. \n", __func__);
     goto err;
   }
-  #ifdef DEBUG_MODE_BRIEF
+  #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
     else{
       printk(KERN_INFO "%s, blk_mq_alloc_tag_set is done. \n", __func__);
     }
@@ -724,7 +724,7 @@ int init_gendisk(struct rmem_device_control* rmem_dev_ctrl ){
   // After call this function, disk is active and prepared well for any i/o request.
   add_disk(rmem_dev_ctrl->disk);
 
-  #ifdef DEBUG_MODE_BRIEF
+  #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
   printk("init_gendisk : initialize disk %s done. \n", rmem_dev_ctrl->disk->disk_name);
   #endif
 
@@ -813,7 +813,7 @@ int RMEM_create_device(char* dev_name, struct rmem_device_control* rmem_dev_ctrl
     printk(KERN_ERR "Intialize rmem_device_control error \n");
     goto err;
   }
-  #ifdef DEBUG_MODE_BRIEF
+  #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
     else{
       printk(KERN_INFO "%s,init_rmem_device_control done. \n", __func__);
     }
@@ -825,7 +825,7 @@ int RMEM_create_device(char* dev_name, struct rmem_device_control* rmem_dev_ctrl
     printk(KERN_ERR "Allocate blk_mq_tag_set failed. \n");
    goto err;
   }
-  #ifdef DEBUG_MODE_BRIEF
+  #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
     else{
       printk(KERN_INFO "%s,init_blk_mq_tag_set done. \n", __func__);
     }
@@ -840,7 +840,7 @@ int RMEM_create_device(char* dev_name, struct rmem_device_control* rmem_dev_ctrl
     printk("init_blk_mq_queue failed. \n");
     goto err;
   }
-  #ifdef DEBUG_MODE_BRIEF
+  #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
     else{
       printk(KERN_INFO "%s,init_blk_mq_queue done. \n", __func__);
     }
@@ -855,7 +855,7 @@ int RMEM_create_device(char* dev_name, struct rmem_device_control* rmem_dev_ctrl
     goto err;
   }
 
-  #ifdef DEBUG_MODE_BRIEF
+  #if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
     printk("RMEM_create_device done. \n");
   #endif
 

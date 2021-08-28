@@ -138,19 +138,19 @@
 // //################################## Global variable control ##################################
 
 // Number of Memory server
-#define NUM_OF_MEMORY_SERVER	1
-#define CUR_MEMORY_SERVER_ID 0
+#define NUM_OF_MEMORY_SERVER 2
+//#define CUR_MEMORY_SERVER_ID 0
 
 // Memory server #1, Region[1] to Region[5]
 #define MEMORY_SERVER_0_REGION_START_ID		1
 
 // Memory server #2, Region[5] to Region[9]
-//#define MEMORY_SERVER_1_REGION_START_ID		5
-#define MEMORY_SERVER_1_REGION_START_ID		9		//debug, single server
+#define MEMORY_SERVER_1_REGION_START_ID		5
+//#define MEMORY_SERVER_1_REGION_START_ID		9		//debug, single server
 
 
-static const char cur_mem_server_ip[]    = "10.0.0.2";
-static const char cur_mem_server_port[]  = "9400";
+//static const char cur_mem_server_ip[]    = "10.0.0.2";
+//static const char cur_mem_server_port[]  = "9400";
 
 // Structures of the Regions
 // | -- Meta Region -- | -- Data Regsons --|
@@ -167,9 +167,14 @@ static const char cur_mem_server_port[]  = "9400";
 //#define ASSERT 1
 
 
-
+#ifndef ONE_MB
 #define ONE_MB    ((size_t)1048576)    // 1024 x 2014 bytes
+#endif
+
+#ifndef ONE_GB
 #define ONE_GB    ((size_t)1073741824)   // 1024 x 1024 x 1024 bytes
+#endif
+
 
 #define MAX_SIZE_T   (size_t)-1
 
@@ -181,7 +186,7 @@ static const char cur_mem_server_port[]  = "9400";
 #endif
 
 
-#define MAX_REQUEST_SGL		(size_t)1 		// get from ibv_query_device, should be 32 for our Connect-3. But memory pool don't need this.
+//#define MAX_REQUEST_SGL		(size_t)1 		// get from ibv_query_device, should be 32 for our Connect-3. But memory pool don't need this.
 
 
 // Synchronization mask

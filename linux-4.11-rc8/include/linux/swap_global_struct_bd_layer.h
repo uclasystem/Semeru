@@ -33,13 +33,13 @@
 //
 
 // According to the implementation of kernle, it aleays assume the (logical ?) sector size to be 512 bytes.
-#define RMEM_PHY_SECT_SIZE					(u64)512 	// physical sector seize, used by driver (to disk).
-#define RMEM_LOGICAL_SECT_SIZE			(u64)512		// logical sector seize, used by kernel (to i/o).
+#define RMEM_PHY_SECT_SIZE		(u64)512 	// physical sector seize, used by driver (to disk).
+#define RMEM_LOGICAL_SECT_SIZE		(u64)512		// logical sector seize, used by kernel (to i/o).
 
 #define RMEM_QUEUE_DEPTH           	(u64)4096  	// number of request->tags, for each queue. At least twice the number of RDMA_READ_WRITE_QUEUE_DEPTH.
 //#define RMEM_QUEUE_DEPTH           	(u64)256  	// [DEBUG] number of request->tags, for all the queue.
-#define RMEM_QUEUE_MAX_SECT_SIZE		(u64)1024 	// The max number of sectors per request, /sys/block/sda/queue/max_hw_sectors_kb is 256
-#define DEVICE_NAME_LEN							(u64)32
+#define RMEM_QUEUE_MAX_SECT_SIZE	(u64)1024 	// The max number of sectors per request, /sys/block/sda/queue/max_hw_sectors_kb is 256
+#define DEVICE_NAME_LEN			(u64)32
 
 
 

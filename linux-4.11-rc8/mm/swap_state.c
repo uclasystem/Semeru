@@ -553,9 +553,9 @@ static unsigned long swapin_nr_pages(unsigned long offset)
 	unsigned int pages, max_pages, last_ra;
 	static atomic_t last_readahead_pages;
 
-	//max_pages = 1 << READ_ONCE(page_cluster);
+	max_pages = 1 << READ_ONCE(page_cluster);
 	
-	max_pages = 30;  // !! DEBUG !! match the IB S/G limit
+	//max_pages = 30;  // !! DEBUG !! match the IB S/G limit
 	if (max_pages <= 1)
 		return 1;
 
@@ -638,8 +638,9 @@ struct page *swapin_readahead(swp_entry_t entry, gfp_t gfp_mask,
 	// 2) Only map the demand PTE to the readin physical page.
 	// x) for Semeru, even the swap_entry_t is contiguous, the corresponding virtual addr is not necessarily contiguous. 
 	mask = swapin_nr_pages(offset) - 1; 
-	//debug
-	//printk(KERN_INFO "%s, swap in 0x%lx pages at one time. \n", __func__, mask);
+
+	// TP threads, disable kernel prefetch
+	// mask = 0;
 
 	if (!mask)
 		goto skip;
@@ -661,8 +662,12 @@ struct page *swapin_readahead(swp_entry_t entry, gfp_t gfp_mask,
 						gfp_mask, vma, addr);
 		if (!page)
 			continue;
-		if (offset != entry_offset)
+		if (offset != entry_offset){
 			SetPageReadahead(page);
+			// prefetched page
+			prefetch_swapin_inc();
+		}
+		
 		put_page(page);								// Drop _refcount of ?
 	}
 	blk_finish_plug(&plug);

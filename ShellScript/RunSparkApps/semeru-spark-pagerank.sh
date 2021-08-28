@@ -113,8 +113,8 @@ do
 
 
   # run the application
-	echo "spark-submit --class JavaPageRank   --conf "${confVar}"  ${HOME}/packages/page-rank-1.0.jar ~/data/${InputDataSet} ${pagerankIteration}"
-  (time -p  spark-submit --class JavaPageRank   --conf "${confVar}"  ${HOME}/jars/pagerank.jar ~/data/${InputDataSet} ${pagerankIteration} ) >> "${HOME}/Logs/${tag}.inputSet${InputDataSet}.Iteration${pagerankIteration}.heapSize${heapSize}.LocalMemPecentage${CPUMemPercentage}.${gcMode}.parallelGC${ParallelGCThread}.log" 2>&1
+	echo "spark-submit --class JavaPageRank   --conf "${confVar}"  ${HOME}/packages/page-rank-1.0.jar ~/dataset/${InputDataSet} ${pagerankIteration}"
+  (time -p  spark-submit --class JavaPageRank   --conf "${confVar}"  ${HOME}/jars/pagerank.jar ~/dataset/${InputDataSet} ${pagerankIteration} ) >> "${HOME}/Logs/${tag}.inputSet${InputDataSet}.Iteration${pagerankIteration}.heapSize${heapSize}.LocalMemPecentage${CPUMemPercentage}.${gcMode}.parallelGC${ParallelGCThread}.log" 2>&1
 
   count=`expr $count + 1 `
 done

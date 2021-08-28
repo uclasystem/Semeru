@@ -421,168 +421,12 @@ void G1CollectionSet::print(outputStream* st) {
 
 
 
-
-/*
 //mhr: modify
 //mhr: explanation:
-  //Choose all regions with high garbage ratio and cache ratio
-  //sort based on life time:
-  //choose conditioned on cache ratio and garbage ratio to determine whether to collect it on memory server or CPU server
-void G1CollectionSet::finalize_parts_with_ratio(G1SurvivorRegions* survivors) {
-  double young_start_time_sec = os::elapsedTime();
-  size_t cache_threshold_in_pages = _policy->cache_threshold_in_pages(); //mhr: need to implement
-  size_t max_cset_length = _policy->calc_max_cserver_cset_length();
-  size_t new_collection_set_length = 0;
-  size_t candidates_length = 0;
-  _bytes_used_before = 0; //useless
-  _eden_region_length = _survivor_region_length = 0;
-  _rebuild_set_length = 0;
-
-  HeapRegionManager* hrm = _g1h->hrm();
-
-  uint len = hrm->max_length();
-  HeapRegion* hr = NULL;
-
-  HeapRegion** candidates_regions = NEW_C_HEAP_ARRAY(HeapRegion*, len, mtGC);
-
-  initialize_optional(len);
-  
-  received_memory_server_cset* rmsc = _g1h->recv_mem_server_cset(); 
-  rmsc->reset();                                                                                                                     
- 
-  _survivor_set_cur_length = 0;
-
-  for (uint i = 0; i < len; i++) {
-    if (!hrm->is_available(i)) {
-      continue;
-    }
-    hr = hrm->at(i);
-    //mhr: modify
-    //mhr: new
-    if(hr->is_free()) {
-      continue;
-    }
-    guarantee(hr != NULL, "Tried to access region %u that has a NULL HeapRegion*", i);
-    if(hr->is_young()) {
-      //_collection_set_regions[new_collection_set_length++] = i;
-      _bytes_used_before += hr->used();
-      if(hr->is_eden()) {
-        _eden_region_length++;
-      }
-      else{
-        _survivor_region_length++;
-      }
-      if(i==0){
-        printf("0!\n");
-      }
-      add_young_region_common(hr);
-      new_collection_set_length++;
-    }
-    else if(hr->is_old()){
-      if(hr->_mem_to_cpu_gc->_cm_scanned)
-        hr->cross_region_ref_target_queue()->_age++;
-      size_t cache_pages = cache_ratio_pages(hr);
-
-      
-      log_debug(semeru)("%s, Region %u: scanned? %d, cache: %lf, alive ratio: %lf, queue_age: %d\n", __func__, hr->hrm_index(),hr->_mem_to_cpu_gc->_cm_scanned,
-       (double )cache_pages*PAGE_SIZE/HeapRegion::GrainBytes, hr->_mem_to_cpu_gc->_alive_ratio, hr->cross_region_ref_target_queue()->_age);
-
-      if(hr->_mem_to_cpu_gc->_cm_scanned && (double )(cache_pages*PAGE_SIZE/HeapRegion::GrainBytes) - hr->_mem_to_cpu_gc->_alive_ratio > 0.2) {
-        candidates_regions[candidates_length++] = hr;
-      }
-      else {
-        if(cache_pages > cache_threshold_in_pages) {
-          if(hr->_mem_to_cpu_gc->_cm_scanned && hr->_mem_to_cpu_gc->_alive_ratio < 0.65) {
-            candidates_regions[candidates_length++] = hr;
-          }
-        }
-        else if(!_g1h->_allocator->is_retained_old_region(hr)){
-          if(hr->_mem_to_cpu_gc->_cm_scanned) {
-            if(hr->_mem_to_cpu_gc->_alive_ratio < 0.30){
-              candidates_regions[candidates_length++] = hr;
-            }
-            else if(hr->cross_region_ref_target_queue()->_age > 7 && cache_pages < (HeapRegion::GrainBytes/PAGE_SIZE-cache_threshold_in_pages)) {
-              rmsc->add(hr->hrm_index());
-              _g1h->old_set_remove(hr);
-              add_optional_region(hr);
-              log_debug(semeru)("%s, region[%u] is added into memory srever CSet, cache ratio %lf \n", __func__, 
-                                              hr->hrm_index(), (double)(cache_pages*PAGE_SIZE/HeapRegion::GrainBytes) );
-
-              //hr->cross_region_ref_update_queue()->reset();
-
-              hr->cross_region_ref_target_queue()->reset();
-              //hr->_mem_to_cpu_gc->_cm_scanned = false;
-              hr->reset_region_cm_scanned();
-              _collection_set_regions[_collection_set_cur_length++] = hr->hrm_index();
-              _rebuild_set_length++;
-            }
-          }
-          else if(!hr->cross_region_ref_target_queue()->_marked_from_root && cache_pages < (HeapRegion::GrainBytes/PAGE_SIZE-cache_threshold_in_pages)){
-            rmsc->add(hr->hrm_index());
-            _g1h->old_set_remove(hr);
-            add_optional_region(hr);
-            log_debug(semeru)("%s, region[%u] is added into memory srever CSet, cache ratio %lf \n", __func__, 
-                                              hr->hrm_index(), (double)(cache_pages*PAGE_SIZE/HeapRegion::GrainBytes) );
-          }
-        }
-      }
-      
-    }
-    else { // humonguous region and young region fall into this path.
-
-      log_debug(semeru)("%s, region[%u] humonguous? %d", __func__, hr->hrm_index(), hr->is_humongous() );
-
-    }
-
-
-  }
-
-  // Clear the fields that point to the survivor list - they are all young now.
-  survivors->convert_to_eden();
-  // The number of recorded young regions is the incremental
-  // collection set's current size
-  // set_recorded_rs_lengths(_inc_recorded_rs_lengths);
-  double young_end_time_sec = os::elapsedTime();
-  phase_times()->record_young_cset_choice_time_ms((young_end_time_sec - young_start_time_sec) * 1000.0);
-
-  QuickSort::sort(candidates_regions, candidates_length, G1CollectionSet::compare_region_ages, true);
-  for (size_t i = 0; i < candidates_length && _collection_set_cur_length < max_cset_length; i++){
-    hr = candidates_regions[i];
-    //mhr: modify
-    //mhr: new
-    _g1h->old_set_remove(hr);
-    _collection_set_regions[_collection_set_cur_length++] = hr->hrm_index();
-    _bytes_used_before += hr->used();
-    _g1h->register_old_region_with_cset(hr);
-    log_trace(gc, cset)("Added region %d to collection set", hr->hrm_index());
-  }
-  printf("%lu\n", _collection_set_cur_length);
-  _old_region_length = _collection_set_cur_length - young_region_length();
-  stop_incremental_building();
-  FREE_C_HEAP_ARRAY(HeapRegion*, candidates_regions);
-  //mhr: debug
-  printf("_collection_set_cur_length: %lu\n _collection_set: ", _collection_set_cur_length);
-  for(size_t i = 0; i < _collection_set_cur_length; i++)
-    printf("%d ", _collection_set_regions[i]);
-  printf("\n");
-
-    //mhr: debug
-  printf("_optional_set_cur_length: %u\n _collection_set: ", _optional_region_length);
-  for(size_t i = 0; i < _optional_region_length; i++)
-    printf("%d ", _optional_regions[i]->hrm_index());
-  printf("\n");
-
-}
-*/
-
-
-
-//mhr: modify
-//mhr: explanation:
-  //Choose all regions with high garbage ratio and cache ratio
-  //sort based on life time:
-  //choose conditioned on cache ratio and garbage ratio to determine whether to collect it on memory server or CPU server
-void G1CollectionSet::finalize_parts(G1SurvivorRegions* survivors) {
+//Choose all regions with high garbage ratio and cache ratio
+//sort based on life time:
+//choose conditioned on cache ratio and garbage ratio to determine whether to collect it on memory server or CPU server
+void G1CollectionSet::semeru_finalize_parts(G1SurvivorRegions* survivors) {
   double young_start_time_sec = os::elapsedTime();
 
   //mhr: TODO
@@ -685,9 +529,6 @@ void G1CollectionSet::finalize_parts(G1SurvivorRegions* survivors) {
 
   }
 
-  //_collection_set_cur_length = ;
-  // printf("%lu\n", _collection_set_cur_length);
-
   //uint survivor_region_length = survivors->length();
   //uint eden_region_length = _g1h->eden_regions_count();
   //init_region_lengths(eden_region_length, survivor_region_length);
@@ -696,34 +537,16 @@ void G1CollectionSet::finalize_parts(G1SurvivorRegions* survivors) {
   // Clear the fields that point to the survivor list - they are all young now.
   survivors->convert_to_eden();
 
-  // printf("%lu\n", _collection_set_cur_length);
-
   // The number of recorded young regions is the incremental
   // collection set's current size
   // set_recorded_rs_lengths(_inc_recorded_rs_lengths);
   double young_end_time_sec = os::elapsedTime();
   phase_times()->record_young_cset_choice_time_ms((young_end_time_sec - young_start_time_sec) * 1000.0);
 
-  //hr->reclaimable_bytes() gives the garbage_bytes
-  // size_t garbage_threshold_in_bytes = _policy->garbage_threshold_in_bytes();  //mhr: need to implement
-
   QuickSort::sort(candidates_regions, candidates_length, G1CollectionSet::compare_region_ages, true);
 
-  // printf("%lu\n", _collection_set_cur_length);
-
-  //size_t max_cset_size = _policy->calc_max_cserver_cset_length();
   size_t cset_boundary = 0;
-  // for (size_t i = 0; i < candidates_length && _collection_set_cur_length < max_cset_length; i++){
-  //   cset_boundary++;
-  //   hr = candidates_regions[i];
-  //   //mhr: modify
-  //   //mhr: new
-  //   _g1h->old_set_remove(hr);
-  //   _collection_set_regions[_collection_set_cur_length++] = hr->hrm_index();
-  //   _bytes_used_before += hr->used();
-  //   _g1h->register_old_region_with_cset(hr);
-  //   log_trace(gc, cset)("Added region %d to collection set", hr->hrm_index());
-  // }
+
   for(; cset_boundary < candidates_length; cset_boundary++) {
     hr = candidates_regions[cset_boundary];
     

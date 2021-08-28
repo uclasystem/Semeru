@@ -10,7 +10,13 @@ then
 	exit
 fi
 
-testcase_dir="${HOME}/Semeru/testcase/MemoryServer"
+if [ -z "${SEMERU_HOME}" ]
+then
+  echo "Please configure the SEMERU_HOME in .bashrc"
+  exit 
+fi
+
+testcase_dir="${SEMERU_HOME}/testcase/MemoryServer"
 bench=$1
 
 if [ -z "${bench}"  ]

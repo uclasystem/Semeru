@@ -22,6 +22,54 @@ MODULE_VERSION("1.0");
 
 
 
+// ##########  Global variables ##########
+
+atomic_t rdma_read_to_mem_server[NUM_OF_MEMORY_SERVER];
+atomic_t rdma_write_to_mem_server[NUM_OF_MEMORY_SERVER];
+
+char *mem_server_ip[] = { "10.0.0.2", "10.0.0.14" };
+uint16_t mem_server_port = 9400;
+
+
+
+// ########### Profiling functions ##############
+
+
+void reset_rdma_message_info(void){
+	int mem_server_id;
+
+	for(mem_server_id = 0; mem_server_id < NUM_OF_MEMORY_SERVER; mem_server_id++){
+		atomic_set(&rdma_read_to_mem_server[mem_server_id],0);
+		atomic_set(&rdma_write_to_mem_server[mem_server_id],0);
+	}
+}
+
+// Multiple thread safe.
+void rdma_read_from_mem_server_inc(int mem_server_id){
+	atomic_inc(&rdma_read_to_mem_server[mem_server_id]);
+}
+
+void rdma_write_to_mem_server_inc(int mem_server_id){
+	atomic_inc(&rdma_write_to_mem_server[mem_server_id]);
+}
+
+void periodically_print_info(const char *message)
+{
+	int mem_server_id;
+
+	for (mem_server_id = 0; mem_server_id < NUM_OF_MEMORY_SERVER; mem_server_id++) {
+		if (atomic_read(&rdma_read_to_mem_server[mem_server_id]) &&
+		    atomic_read(&rdma_read_to_mem_server[mem_server_id]) % PRINT_LIMIT == 0) {
+			pr_warn("%s, Memory server[%d] , read %d , write %d (may overflow)", message, mem_server_id,
+				atomic_read(&rdma_read_to_mem_server[mem_server_id]),
+				atomic_read(&rdma_write_to_mem_server[mem_server_id]));
+		}
+	}
+}
+
+//############# End of Profiling functions ##########
+
+
 
 // invoked by insmod 
 int __init semeru_cpu_init(void){

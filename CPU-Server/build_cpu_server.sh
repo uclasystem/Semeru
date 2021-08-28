@@ -22,7 +22,7 @@ fi
 home_dir="$HOME"
 
 # Both available cores && number of jobs
-num_core=16
+num_core=`nproc --all`
 # in MB, 32GB as default
 build_mem="32768"
 boot_jdk="${home_dir}/jdk-12.0.2"

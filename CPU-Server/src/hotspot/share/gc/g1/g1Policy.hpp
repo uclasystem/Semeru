@@ -354,8 +354,8 @@ public:
                                const char* false_action_str) const;
 
   //mhr: modify
-  void finalize_collection_set(G1SurvivorRegions* survivor);
-  //void finalize_collection_set(double target_pause_time_ms, G1SurvivorRegions* survivor);
+  void semeru_finalize_collection_set(G1SurvivorRegions* survivor);
+  void finalize_collection_set(double target_pause_time_ms, G1SurvivorRegions* survivor);
 private:
   // Set the state to start a concurrent marking cycle and clear
   // _initiate_conc_mark_if_possible because it has now been

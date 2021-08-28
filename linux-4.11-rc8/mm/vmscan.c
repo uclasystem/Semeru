@@ -1868,6 +1868,7 @@ keep:
 }
 
 
+#ifdef UNDER_DEVELOPEMENT
 
 /**
  * Semeru CPU : Free the zero referencing pages from the isolated page_list.
@@ -1985,7 +1986,7 @@ keep:
 }
 
 
-
+#endif // end of UNDER_DEVELOPEMENT
 
 
 
@@ -2370,6 +2371,8 @@ putback_inactive_pages(struct lruvec *lruvec, struct list_head *page_list)
 
 
 
+#ifdef UNDER_DEVELOPEMENT
+
 /**
  * Semeru CPU, putback uevictable LRU list.
  *  
@@ -2432,7 +2435,6 @@ putback_unevictable_pages(struct lruvec *lruvec, struct list_head *page_list)
 }
 
 
-
 /**
  * Semeru CPU : wait the finish of paging out.
  *  
@@ -2462,6 +2464,10 @@ wait_until_write_done(struct list_head *page_list){
 
 	return nr_write_done;
 }
+
+#endif // end of UNDER_DEVELOPEMENT
+
+
 
 /**
  * Semeru CPU
@@ -2938,7 +2944,7 @@ semeru_shrink_flush_list(void) {
 
 
 
-
+#ifdef UNDER_DEVELOPEMENT
 
 
 /**
@@ -3052,7 +3058,7 @@ semeru_shrink_unevictable_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 
 
 
-
+#endif // end of UNDER_DEVELOPEMENT
 
 
 

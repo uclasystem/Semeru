@@ -9,11 +9,13 @@
 #
 # Normal rules
 #
-.*
+#.*
 *.o
 *.o.*
 *.a
+*.d
 *.s
+*.S
 *.ko
 *.so
 *.so.dbg
@@ -22,6 +24,7 @@
 *.lst
 *.symtypes
 *.order
+*.old
 *.elf
 *.bin
 *.tar
@@ -38,6 +41,7 @@ Module.symvers
 *.dwo
 *.su
 *.c.[012]*.*
+*.cmd
 
 #
 # Top-level generic files

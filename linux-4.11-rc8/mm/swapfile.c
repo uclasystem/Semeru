@@ -3249,10 +3249,9 @@ EXPORT_SYMBOL_GPL(__virt_page_index);
 sector_t semeru_map_swap_page(struct page *page, struct block_device **bdev)
 {
 	struct swap_info_struct *sis;
-	unsigned long user_virt_addr;  // byte address.
+	unsigned long user_virt_addr; // byte address.
 	swp_entry_t entry;
 	entry.val = page_private(page); // page index, replace to get virtual address.
-
 
 	// 1) set block_device
 	sis = swap_info[swp_type(entry)]; // Get the swap_partition via swap type.
@@ -3260,30 +3259,26 @@ sector_t semeru_map_swap_page(struct page *page, struct block_device **bdev)
 
 	// 2) get sector address.
 	user_virt_addr = retrieve_swap_remmaping_virt_addr(entry);
-	if( user_virt_addr != INITIAL_VALUE ){
-		#ifdef DEBUG_SWAP_PATH
-			printk("%s,Get Remap from swp_entry_t[0x%llx] (type: 0x%llx, offset: 0x%llx) to virt_addr page 0x%llx \n", 
-																__func__, (u64)entry.val, (u64)swp_type(entry), (u64)swp_offset(entry), (u64)user_virt_addr );
-		#endif
-	
+	if (user_virt_addr != INITIAL_VALUE) {
+#ifdef DEBUG_SWAP_PATH
+		printk("%s,Get Remap from swp_entry_t[0x%llx] (type: 0x%llx, offset: 0x%llx) to virt_addr page 0x%llx \n",
+		       __func__, (u64)entry.val, (u64)swp_type(entry), (u64)swp_offset(entry), (u64)user_virt_addr);
+#endif
+
 		//  virtual address, offset to RDMA_DATA_SPACE_START_ADDR, do we need to change it to sect
 		return user_virt_addr;
 	}
-
-	#ifdef DEBUG_SWAP_PATH_DETAIL
-	else{
-		printk("%s, Get swp_entry_t offset : 0x%llx ,  user_virt_addr is 0.\n",__func__, (u64)swp_offset(entry));
+#ifdef DEBUG_SWAP_PATH_DETAIL
+	else {
+		printk("%s, Get swp_entry_t offset : 0x%llx ,  user_virt_addr is 0.\n", __func__,
+		       (u64)swp_offset(entry));
 	}
-	#endif
-	
-	
+#endif
+
 	// 3) Not record the remapping address, roll back to normal path.
 	// Reassign the block_device is ok.
 	return map_swap_entry(entry, bdev);
 }
-
-
-
 
 // End of semeru
 //

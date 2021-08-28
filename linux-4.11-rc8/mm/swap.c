@@ -64,6 +64,7 @@ unsigned long swp_entry_to_virtual_remapping[SWAP_ARRAY_LENGTH];
 atomic_t jvm_region_swap_out_counter[SWAP_OUT_MONITOR_ARRAY_LEN];
 
 atomic_t on_demand_swapin_number;
+atomic_t prefetch_swapin_number;
 atomic_t hit_on_swap_cache_number;
 
 //
@@ -127,15 +128,8 @@ static pte_t* walk_page_table(struct mm_struct *mm, u64 addr){
  return ptep;
 }
 
-
-
-
-
 /**
  * Insert a (swp_entry_offset, virtual address) pair into the array.
- * 
- *  
- * 
  * 
  * More Explanation : 
  * 	1) For a shared page, use the first process's virtual address as the remapped address.
@@ -146,20 +140,21 @@ static pte_t* walk_page_table(struct mm_struct *mm, u64 addr){
  * 		 If we use the absolute virtual address, it will beyound the sector check, which start from 0.
  * 
  */
-void insert_swp_entry( struct page *page  , unsigned long virt_addr  ){
+void insert_swp_entry(struct page *page, unsigned long virt_addr)
+{
 	swp_entry_t entry = { .val = page_private(page) };
 	// Change the swp_offset to the full value.
 	// swp_offset is not arch specific
-	//swp_entry_to_virtual_remapping[swp_offset(entry)] = ( (virt_addr -  RDMA_DATA_SPACE_START_ADDR) >> PAGE_SHIFT );
+	// Virtual page offset is count from the Data region.
+	swp_entry_to_virtual_remapping[swp_offset(entry)] = ((virt_addr - RDMA_DATA_SPACE_START_ADDR) >> PAGE_SHIFT);
 
 	// enable the swap-out of Meta Region
-	swp_entry_to_virtual_remapping[swp_offset(entry)] = ( (virt_addr -  SEMERU_START_ADDR) >> PAGE_SHIFT );
+	//swp_entry_to_virtual_remapping[swp_offset(entry)] = ( (virt_addr -  SEMERU_START_ADDR) >> PAGE_SHIFT );
 
-	#ifdef DEBUG_SWAP_PATH
-			printk("%s,Build Remap from swp_entry_t[0x%llx] (type: 0x%llx, offset: 0x%llx) to virt_addr 0x%llx pages\n", 
-																__func__, (u64)entry.val, (u64)swp_type(entry), (u64)swp_offset(entry), (u64)(virt_addr >> PAGE_SHIFT) );
-	#endif
-
+#ifdef DEBUG_SWAP_PATH
+	printk("%s,Build Remap from swp_entry_t[0x%llx] (type: 0x%llx, offset: 0x%llx) to virt_addr 0x%llx pages\n",
+	       __func__, (u64)entry.val, (u64)swp_type(entry), (u64)swp_offset(entry), (u64)(virt_addr >> PAGE_SHIFT));
+#endif
 }
 
 // inline it 
@@ -213,68 +208,62 @@ void print_swap_entry_t_and_sector_addr(struct page * page, const char* message)
 // Debug function
 //
 
-
-
-bool within_range(u64 val){
-	
+/**
+ * @brief This function defines which part of data can be swapped out via data path.
+ * 
+ * @param val 
+ * @return true, within data path swap-out range.
+ * @return false out of the data path swap-out range.
+ */
+bool within_range(u64 val)
+{
 	// 1) normal swap, for swp_entry_t --> virtual remap
 	//    Only data Region can be swapped out.
-	//if( val >= (u64)RDMA_DATA_SPACE_START_ADDR && val < (u64)(RDMA_DATA_SPACE_START_ADDR + (size_t)MAX_SWAP_MEM_GB*ONE_GB )  ){
-	//	return 1;
-	//}
-
-
-
-	// Enable the swap-out of Meta Region.
-	if( val >= (u64)(SEMERU_START_ADDR + RDMA_META_REGION_SWAP_PART_OSSFET) && val < (u64)(SEMERU_START_ADDR + (u64)MAX_REGION_NUM*REGION_SIZE_GB*ONE_GB)  ){
-
-		#ifdef DEBUG_SWAP_PATH_DETAIL
-			printk(KERN_INFO "%s, virt page 0x%llx is within swapped out range[ 0x%llx, 0x%llx]\n",__func__,
-																	val, (u64)(SEMERU_START_ADDR + RDMA_META_REGION_SWAP_PART_OSSFET), 
-																	(u64)(SEMERU_START_ADDR + (u64)MAX_REGION_NUM*REGION_SIZE_GB*ONE_GB));
-		#endif
-
+	if( val >= (u64)RDMA_DATA_SPACE_START_ADDR && val < (u64)(RDMA_DATA_SPACE_START_ADDR + (size_t)MAX_SWAP_MEM_GB*ONE_GB )  ){
 		return 1;
 	}
 
+	// Enable the swap-out of Meta Region.
+// 	if (val >= (u64)(SEMERU_START_ADDR + RDMA_META_REGION_SWAP_PART_OSSFET) &&
+// 	    val < (u64)(SEMERU_START_ADDR + (u64)MAX_REGION_NUM * REGION_SIZE_GB * ONE_GB)) {
+// #ifdef DEBUG_SWAP_PATH_DETAIL
+// 		printk(KERN_INFO "%s, virt page 0x%llx is within swapped out range[ 0x%llx, 0x%llx]\n", __func__, val,
+// 		       (u64)(SEMERU_START_ADDR + RDMA_META_REGION_SWAP_PART_OSSFET),
+// 		       (u64)(SEMERU_START_ADDR + (u64)MAX_REGION_NUM * REGION_SIZE_GB * ONE_GB));
+// #endif
 
-	#ifdef DEBUG_SWAP_PATH_DETAIL
-		printk(KERN_INFO "%s, virt page 0x%llx is NOT within swapped out range[ 0x%llx, 0x%llx]\n",__func__,
-																	val, (u64)(SEMERU_START_ADDR + RDMA_META_REGION_SWAP_PART_OSSFET), 
-																	(u64)(SEMERU_START_ADDR + (u64)MAX_REGION_NUM*REGION_SIZE_GB*ONE_GB));
-	#endif
-	
+// 		return 1;
+// 	}
+
+#ifdef DEBUG_SWAP_PATH_DETAIL
+	printk(KERN_INFO "%s, virt page 0x%llx is NOT within swapped out range[ 0x%llx, 0x%llx]\n", __func__, val,
+	       (u64)(SEMERU_START_ADDR + RDMA_META_REGION_SWAP_PART_OSSFET),
+	       (u64)(SEMERU_START_ADDR + (u64)MAX_REGION_NUM * REGION_SIZE_GB * ONE_GB));
+#endif
+
 	return 0;
 }
 
-
-bool print_swapped_annoymous_page_info(struct page *page, struct page_vma_mapped_walk *pvmw, const char* message){
-
+bool print_swapped_annoymous_page_info(struct page *page, struct page_vma_mapped_walk *pvmw, const char *message)
+{
 	// Only cares about annoymous page
-	if( PageAnon(page) && within_range((u64)pvmw->address) ){
-		printk("%s, start, page->_mapcount: %d, page->mapping: 0x%llx \n", 
-																				message, 
-																				page->_mapcount.counter, 
-																				(u64)page->mapping);
-		printk("    virtual addr: 0x%llx, pte: 0x%llx ,\n     physical addr:0x%llx, page: 0x%llx \n", 
-																				(u64)pvmw->address, 
-																				(u64)pte_val(*pvmw->pte), 
-																				(u64)page_to_phys(page),
-																				(u64)page);
-		printk("    page->private: 0x%llx, in swap_cache ? %d \n End \n", (u64)page_private(page), PageSwapCache(page) );
+	if (PageAnon(page) && within_range((u64)pvmw->address)) {
+		printk("%s, start, page->_mapcount: %d, page->mapping: 0x%llx \n", message, page->_mapcount.counter,
+		       (u64)page->mapping);
+		printk("    virtual addr: 0x%llx, pte: 0x%llx ,\n     physical addr:0x%llx, page: 0x%llx \n",
+		       (u64)pvmw->address, (u64)pte_val(*pvmw->pte), (u64)page_to_phys(page), (u64)page);
+		printk("    page->private: 0x%llx, in swap_cache ? %d \n End \n", (u64)page_private(page),
+		       PageSwapCache(page));
 
-		// Check page->flags 
-		print_pte_flags( *(pvmw->pte) , CHECK_FLUSH_MOD, "pvmw.pte");
-		print_page_flags(page,CHECK_FLUSH_MOD , "Page");
+		// Check page->flags
+		print_pte_flags(*(pvmw->pte), CHECK_FLUSH_MOD, "pvmw.pte");
+		print_page_flags(page, CHECK_FLUSH_MOD, "Page");
 
 		return 1; // enable debug
 	}
 
-
 	return 0; // not debug
 }
-
-
 
 //
 // LRU list debug 
@@ -675,31 +664,23 @@ void print_bio_info(struct bio * bio_ptr, const char* message){
   
 }
 
-
-
-
 /**
  * Print the i/o request information only when it's in the specific range.
  *  
  */
-void print_bio_within_range(struct bio * bio_ptr, const char* message){
-	u64  start_addr = 0;
+void print_bio_within_range(struct bio *bio_ptr, const char *message)
+{
+	u64 start_addr = 0;
 
-	if((void*)bio_ptr != NULL ){
-    start_addr   = (u64)bio_ptr->bi_iter.bi_sector << 9;    // request->_sector. Sector start address, change to bytes.
-	
+	if ((void *)bio_ptr != NULL) {
+		// request->_sector. Sector start address, change to bytes.
+		start_addr = (u64)bio_ptr->bi_iter.bi_sector << 9; 
 
-		if(within_range(start_addr)){
+		if (within_range(start_addr)) {
 			print_bio_info(bio_ptr, message);
 		}
-
 	}
 }
-
-
-
-
-
 
 void print_io_request_info(struct request *io_rq, const char* message){
 

@@ -177,8 +177,6 @@ private :
   // fixed offset ?
   received_memory_server_cset* _recv_mem_server_cset;
 
-
-
 public :
 
   //mhr: TODO
@@ -200,6 +198,33 @@ public :
   flags_of_cpu_server_state* _cpu_server_flags;
 
   flags_of_mem_server_state* _mem_server_flags;
+
+
+  void initialize_cpu_mem_comm_structs(ReservedSpace* rs){
+    if(rs == NULL){
+      _recv_mem_server_cset = NULL;
+      _cpu_server_flags = NULL;
+      _mem_server_flags = NULL;
+    }else{
+
+      _recv_mem_server_cset 	= new(MEMORY_SERVER_CSET_SIZE, rs->base() + MEMORY_SERVER_CSET_OFFSET) received_memory_server_cset();
+	    _cpu_server_flags				=	new(FLAGS_OF_CPU_SERVER_STATE_SIZE, rs->base() + FLAGS_OF_CPU_SERVER_STATE_OFFSET) flags_of_cpu_server_state();
+      _mem_server_flags       =	new(FLAGS_OF_MEM_SERVER_STATE_SIZE, rs->base() + FLAGS_OF_MEM_SERVER_STATE_OFFSET) flags_of_mem_server_state();
+
+		  #ifdef ASSERT
+		  log_debug(semeru, alloc)("%s, Meta data allocation Start\n", __func__);
+		  log_debug(semeru, alloc)("	received_memory_server_cset 0x%lx, flexible array 0x%lx",  
+																							(size_t)_recv_mem_server_cset, (size_t)_recv_mem_server_cset->_region_cset  );
+		  log_debug(semeru, alloc)("	flags_of_cpu_server_state  0x%lx, flexible array 0x%lx",  
+																							(size_t)_cpu_server_flags, (size_t)0 );
+      log_debug(semeru, alloc)("	flags_of_mem_server_state  0x%lx, flexible array 0x%lx",  
+																							(size_t)_mem_server_flags, (size_t)0 );
+
+		  log_debug(semeru, alloc)("%s, Meta data allocation End \n", __func__);
+		  #endif
+    }
+    
+  }
 
   received_memory_server_cset* recv_mem_server_cset() { return _recv_mem_server_cset;  }
   void update_cset_to_mem_server(size_t mem_id )	{ 
@@ -855,6 +880,9 @@ private:
   // thread. It returns false if it is unable to do the collection due
   // to the GC locker being active, true otherwise
   bool do_collection_pause_at_safepoint(double target_pause_time_ms);
+
+  // Semeru CPU Server Stop-the-world GC
+  bool semeru_do_collection_pause_at_safepoint(double target_pause_time_ms);
 
   // Actually do the work of evacuating the collection set.
   void evacuate_collection_set(G1ParScanThreadStateSet* per_thread_states);

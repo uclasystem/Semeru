@@ -211,7 +211,12 @@ bool VM_CollectForMetadataAllocation::initiate_concurrent_GC() {
 
     if (should_start) {
       double pause_target = g1h->g1_policy()->max_pause_time_ms();
-      g1h->do_collection_pause_at_safepoint(pause_target);
+
+      if(SemeruEnableMemPool && UseCompressedOops == false){
+        g1h->semeru_do_collection_pause_at_safepoint(pause_target);
+      }else{
+        g1h->do_collection_pause_at_safepoint(pause_target);
+      }
     }
     return true;
   }

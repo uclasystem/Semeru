@@ -28,6 +28,9 @@
 //  ###################### Module control option  ######################
 //
 
+// Some functions are under developtment, disable them when releasing the code.
+// #define UNDER_DEVELOPEMENT 1
+
 // #1 enable the swp_entry_t to virtual address remap or not
 // The memory range not in the RANGE will be not swapped out by adding them into unevictable list.
 #define ENABLE_SWP_ENTRY_VIRT_REMAPPING 1
@@ -44,33 +47,38 @@
 // ##################### Parameters configuration  ######################
 //
 
-
 // Structures of the Regions
 // | -- Meta Region -- | -- Data Regsons --|
 //  The meta Regions starts from SEMERU_START_ADDR. Its size is defined by RDMA_STRUCTURE_SPACE_SIZE.
-#define REGION_SIZE_GB    						((size_t)4)   	// RDMA manage granularity, not the Heap Region.
-#define RDMA_DATA_REGION_NUM     			8
-#define SEMERU_START_ADDR   ((size_t)0x400000000000)
+#define REGION_SIZE_GB 4UL // RDMA manage granularity, not the Heap Region.
+#define RDMA_META_REGION_NUM 1UL
+#define RDMA_DATA_REGION_NUM 8UL
+#define SEMERU_START_ADDR 0x400000000000UL
+#define NUM_OF_MEMORY_SERVER 2UL
 
-// Number of Memory servers
-#define NUM_OF_MEMORY_SERVER	1
+// ###
+// below is derived macros
 
-// Memory server #1, Region[1] to Region[5]
-#define MEMORY_SERVER_0_REGION_START_ID		1
-#define MEMORY_SERVER_0_START_ADDR	(size_t)(SEMERU_START_ADDR + MEMORY_SERVER_0_REGION_START_ID * RDMA_STRUCTURE_SPACE_SIZE)
+//
+// Meta space
+#define RDMA_META_SPACE_START_ADDR (SEMERU_START_ADDR)
+#define RDMA_STRUCTURE_SPACE_SIZE (RDMA_META_REGION_NUM * REGION_SIZE_GB * ONE_GB)
 
-// Memory server #2, Region[5] to Region[9]
-//#define MEMORY_SERVER_1_REGION_START_ID		5
-#define MEMORY_SERVER_1_REGION_START_ID		9		//debug, single server
-#define MEMORY_SERVER_1_START_ADDR	(size_t)(SEMERU_START_ADDR + MEMORY_SERVER_1_REGION_START_ID * RDMA_STRUCTURE_SPACE_SIZE)
+//
+// Data space
+#define RDMA_DATA_SPACE_START_ADDR (RDMA_META_SPACE_START_ADDR + RDMA_STRUCTURE_SPACE_SIZE)
+#define DATA_REGION_PER_MEM_SERVER (RDMA_DATA_REGION_NUM / NUM_OF_MEMORY_SERVER)
 
-// Define the ip of each memory servers.
-static char mem_server_ip[]= "10.0.0.2";
-static uint16_t mem_server_port = 9400;
+// Memory server #1, Data Region[1] to Region[5]
+// Only being used for correctness checks,
+// Plase calculated this derived information.
+#define MEMORY_SERVER_0_REGION_START_ID (RDMA_META_REGION_NUM)
+#define MEMORY_SERVER_0_START_ADDR (RDMA_DATA_SPACE_START_ADDR)
 
-
-
-
+// Memory server #2, Data Region[5] to Region[9]
+#define MEMORY_SERVER_1_REGION_START_ID (MEMORY_SERVER_0_REGION_START_ID + DATA_REGION_PER_MEM_SERVER)
+//#define MEMORY_SERVER_1_REGION_START_ID 9 //debug, single server
+#define MEMORY_SERVER_1_START_ADDR (MEMORY_SERVER_0_START_ADDR + DATA_REGION_PER_MEM_SERVER * REGION_SIZE_GB * ONE_GB)
 
 
 //
@@ -104,24 +112,23 @@ static uint16_t mem_server_port = 9400;
 //#define DEBUG_RDMA_ONLY 1			// Only build and install RDMA modules.
 //#define DEBUG_FRONTSWAP_ONLY 1    // Use the local DRAM, not connect to RDMA
 
-//#define ASSERT 1		// general debug 
-
-
-
-
-
+//#define ASSERT 1		// general debug
 
 //
 // Basic Macro
 //
 
-#define ONE_MB    ((size_t)1048576)				// 1024 x 2014 bytes
-#define ONE_GB    ((size_t)1073741824)   	// 1024 x 1024 x 1024 bytes
-
-#ifndef PAGE_SIZE
-	#define PAGE_SIZE		      						((size_t)4096)	// bytes, use the define of kernel.
+#ifndef ONE_MB
+#define ONE_MB ((size_t)1048576) // 1024 x 2014 bytes
 #endif
 
+#ifndef ONE_GB
+#define ONE_GB ((size_t)1073741824) // 1024 x 1024 x 1024 bytes
+#endif
+
+#ifndef PAGE_SIZE
+#define PAGE_SIZE ((size_t)4096) // bytes, use the define of kernel.
+#endif
 
 //
 // RDMA Related
@@ -173,7 +180,7 @@ extern uint64_t RMEM_SIZE_IN_PHY_SECT;			// [?] Where is it defined ?
 
 // RDMA structure space
 // [  Small meta data  ]  [ aliv_bitmap per region ]   [ dest_bitmap per region ] [ reserved for now]
-#define RDMA_STRUCTURE_SPACE_SIZE  ((size_t) ONE_GB *4)
+//#define RDMA_STRUCTURE_SPACE_SIZE  ((size_t) ONE_GB *4) // moved to semeru_cpu.h
 
 
 
@@ -291,7 +298,7 @@ extern uint64_t RMEM_SIZE_IN_PHY_SECT;			// [?] Where is it defined ?
 //    range [1GB, 1GB+256MB). The usage is based on application.
 //    [?] Pre commit tall the space ?
 #define KLASS_INSTANCE_OFFSET               (size_t)(RDMA_META_REGION_SWAP_PART_OSSFET)    // +512MB, 0x400,020,000,000
-#define KLASS_INSTANCE_OFFSET_SIZE_LIMIT    (size_t)(256*ONE_MB)                                 //       0x400,030,000,000
+#define KLASS_INSTANCE_OFFSET_SIZE_LIMIT    (size_t)(256*ONE_MB)                           //       0x400,030,000,000
 
 
 

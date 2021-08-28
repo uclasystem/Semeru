@@ -64,6 +64,23 @@ function close_swap_partition () {
 }
 
 
+function close_semeru_swap_partition () {
+
+  echo "Close mounted Semeru Swap Partition"
+  swap_bd=$(swapon -s | grep "${swap_file}" | cut -d " " -f 1 )
+  
+  if [ -z "${swap_bd}" ]
+  then
+    echo "Nothing to close."
+  else
+    echo "Swap Partition to close :${swap_bd} "
+    sudo swapoff "${swap_bd}"  
+  fi 
+
+	#check
+	echo "Current swap partition:"
+	swapon -s
+}
 
 function create_swap_file () {
 
@@ -131,7 +148,7 @@ elif [	"${action}" = "close_semeru"	]
 then
 	
 	#1
-	close_swap_partition
+	close_semeru_swap_partition
 
 	#2 remove the semeru moduels
 	echo "Remove the semeru_cpu_server modeule"

@@ -7,6 +7,13 @@
 ## Parameters
 # 1st, operation type: create, delete 
 # 2nd, size for cgroup limitation.
+# 3rd, the name of the cgroup
+
+echo " Help message"
+echo "Parameters"
+echo "  1st, operation type: create, delete"
+echo "  2nd, the name of the cgroup. Default memctl"
+echo "  3rd, size for cgroup limitation. Default 10g"
 
 operation=$1
 
@@ -20,7 +27,17 @@ fi
 if [ "${operation}" = "create"  ]
 then
 
-	mem_size=$2
+  cgroup_name=$2
+  if [ -z "${cgroup_name}" ]
+  then
+    echo "Used default cgroup name, memctl"
+    cgroup_name="memctl"
+  else
+    echo "Cgroup name : ${cgroupp_name}"
+  fi
+
+
+	mem_size=$3
 
 	if [ -z "${mem_size}"  ]
 	then
@@ -34,18 +51,28 @@ then
 	user=`whoami`
 
 	#1 Create 
-	echo "sudo cgcreate -t ${user} -a ${user} -g memory:/memctl"
-	sudo cgcreate -t ${user} -a ${user} -g memory:/memctl
+	echo "sudo cgcreate -t ${user} -a ${user} -g memory:/${cgroup_name}"
+	sudo cgcreate -t ${user} -a ${user} -g memory:/${cgroup_name}
 
 
 	#2 Limi the memory size 
-	echo "${mem_size} > /sys/fs/cgroup/memory/memctl/memory.limit_in_bytes"
-	sudo echo ${mem_size} > /sys/fs/cgroup/memory/memctl/memory.limit_in_bytes
+	echo "${mem_size} > /sys/fs/cgroup/memory/${cgroup_name}/memory.limit_in_bytes"
+	sudo echo ${mem_size} > /sys/fs/cgroup/memory/${cgroup_name}/memory.limit_in_bytes
 
 elif [	${operation} = "delete"	]
 then 
-	echo " sudo cgdelete memory:/memctl"
-	sudo cgdelete memory:/memctl
+  
+  cgroup_name=$2
+  if [ -z "${cgroup_name}" ]
+  then
+    echo "Used default cgroup name, memctl"
+    cgroup_name="memctl"
+  else
+    echo "Cgroup name : ${cgroupp_name}"
+  fi
+
+	echo " sudo cgdelete memory:/${cgroup_name}"
+	sudo cgdelete memory:/${cgroup_name}
 
 else
 	echo "!! Wrong operation !!"

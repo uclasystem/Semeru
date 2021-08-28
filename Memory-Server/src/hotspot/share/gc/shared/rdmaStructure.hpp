@@ -592,8 +592,7 @@ public :
 
     assert(sizeof(uint32_t) == granularity, "wrong granularity. ");
 
-    memset(ptr, byte_size/granularity, 0);
-    
+    memset(ptr, 0, byte_size/granularity);
   }
 
 

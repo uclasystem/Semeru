@@ -1230,15 +1230,16 @@ uint G1Policy::calc_max_old_cset_length() const {
   return (uint) result;
 }
 
-//mhr: modify
-void G1Policy::finalize_collection_set(G1SurvivorRegions* survivor) {
-  _collection_set->finalize_parts(survivor);
-  //_collection_set->finalize_parts_with_ratio(survivor);
+
+void G1Policy::finalize_collection_set(double target_pause_time_ms, G1SurvivorRegions* survivor) {
+  double time_remaining_ms = _collection_set->finalize_young_part(target_pause_time_ms, survivor);
+  _collection_set->finalize_old_part(time_remaining_ms);
 }
-// void G1Policy::finalize_collection_set(double target_pause_time_ms, G1SurvivorRegions* survivor) {
-//   double time_remaining_ms = _collection_set->finalize_young_part(target_pause_time_ms, survivor);
-//   _collection_set->finalize_old_part(time_remaining_ms);
-// }
+
+//Semeru version
+void G1Policy::semeru_finalize_collection_set(G1SurvivorRegions* survivor) {
+  _collection_set->semeru_finalize_parts(survivor);
+}
 
 void G1Policy::transfer_survivors_to_cset(const G1SurvivorRegions* survivors) {
 
@@ -1256,9 +1257,10 @@ void G1Policy::transfer_survivors_to_cset(const G1SurvivorRegions* survivors) {
     // The region is a non-empty survivor so let's add it to
     // the incremental collection set for the next evacuation
     // pause.
-    //mhr: modify
-    //mhr: should not add survivor regions here
-    //_collection_set->add_survivor_regions(curr);
+    // Semeru doesn't update CSet here.
+    if(SemeruEnableMemPool == false){
+      _collection_set->add_survivor_regions(curr);
+    }
 
     last = curr;
   }

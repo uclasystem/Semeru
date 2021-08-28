@@ -43,7 +43,7 @@ EXPORT_SYMBOL(rdma_ops_wrapper);
  * 
  * Parameters:
  * 		type 1, 1-sided rdma read;  
- *    type 2, 1-sided rdma data write;
+ *    		type 2, 1-sided rdma data write;
  * 		type 3, 1-sided rdma signal write; Flush all the outstanding messages before issue signal.
  * 		target_server : the id of memory server
  * 		start_addr,
@@ -55,7 +55,7 @@ asmlinkage int sys_do_semeru_rdma_ops(int type, int target_server,  char __user 
 	char* ret;
 	int write_type;
 
-	#ifdef DEBUG_MODE_BRIEF
+	#if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
 	printk("Enter %s. with type 0x%x \n", __func__, type);
 	#endif
 
@@ -70,7 +70,7 @@ asmlinkage int sys_do_semeru_rdma_ops(int type, int target_server,  char __user 
 		// rdma data write 
 		if( rdma_ops_in_kernel.rdma_write != NULL){
 			
-			#ifdef DEBUG_MODE_BRIEF
+			#if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
 			printk("rdma_ops_in_kernel.rdma_write is 0x%llx. \n",(uint64_t)rdma_ops_in_kernel.rdma_write );
 			#endif
 			write_type = 0x0; // data write 
@@ -87,7 +87,7 @@ asmlinkage int sys_do_semeru_rdma_ops(int type, int target_server,  char __user 
 		// rdma signal write 
 		if( rdma_ops_in_kernel.rdma_write != NULL){
 			
-			#ifdef DEBUG_MODE_BRIEF
+			#if defined(DEBUG_MODE_BRIEF) || defined(DEBUG_MODE_DETAIL)
 			printk("rdma_ops_in_kernel.rdma_write is 0x%llx. \n",(uint64_t)rdma_ops_in_kernel.rdma_write );
 			#endif
 			write_type = 0x1; // signal write 
@@ -114,7 +114,6 @@ asmlinkage int sys_do_semeru_rdma_ops(int type, int target_server,  char __user 
 // Functions for swap ratio monitor
 //
 
-
 /**
  * Semeru CPU, reset array initial value to 0.
  * 
@@ -122,51 +121,46 @@ asmlinkage int sys_do_semeru_rdma_ops(int type, int target_server,  char __user 
  * 				-1 , error. 
  * 
  */
-asmlinkage int sys_swap_stat_reset_and_check(u64 start_vaddr, u64 bytes_len){
+asmlinkage int sys_swap_stat_reset_and_check(u64 start_vaddr, u64 bytes_len)
+{
 	u32 i;
 
 	//printk(KERN_INFO"%s, reset swap out monitor information. \n", __func__);
 
 	// 1) reset on-demand swapin counter.
 	reset_swap_info();
-	printk(KERN_INFO"%s, ater reset, on_demand_swapin_number 0x%x \n",__func__,  get_on_demand_swapin_number());
+	printk(KERN_INFO "%s, ater reset, on_demand_swapin_number 0x%x \n", __func__, get_on_demand_swapin_number());
 
-
-	// 2) the [buff, buff+ bytes_len) must fall into the cover of the array.
-	// 
-	#ifdef DEBUG_SERVER_HOME
-	if(within_range(start_vaddr)){
-		
-		for(i=0; i<SWAP_OUT_MONITOR_ARRAY_LEN; i++ ){
+// 2) the [buff, buff+ bytes_len) must fall into the cover of the array.
+//
+#ifdef DEBUG_SERVER_HOME
+	if (within_range(start_vaddr)) {
+		for (i = 0; i < SWAP_OUT_MONITOR_ARRAY_LEN; i++) {
 			//jvm_region_swap_out_counter[i] = 0;
 			atomic_set(&jvm_region_swap_out_counter[i], 0);
 		}
 
 		return 0;
-	}// end of if.
-	#else
-	if( (u64)start_vaddr >= SWAP_OUT_MONITOR_VADDR_START  &&  bytes_len <=  (u64)(SWAP_OUT_MONITOR_ARRAY_LEN *(1<<SWAP_OUT_MONITOR_UNIT_LEN_LOG)) ){
-		
-		for(i=0; i<SWAP_OUT_MONITOR_ARRAY_LEN; i++ ){
+	} // end of if.
+#else
+	if ((u64)start_vaddr >= SWAP_OUT_MONITOR_VADDR_START &&
+	    bytes_len <= (u64)(SWAP_OUT_MONITOR_ARRAY_LEN * (1 << SWAP_OUT_MONITOR_UNIT_LEN_LOG))) {
+		for (i = 0; i < SWAP_OUT_MONITOR_ARRAY_LEN; i++) {
 			//jvm_region_swap_out_counter[i] = 0;
 			atomic_set(&jvm_region_swap_out_counter[i], 0);
 		}
 
-		printk(KERN_INFO"%s, Region monitoring, reset jvm_region_swap_out_counter[] to 0 \n",__func__);
+		printk(KERN_INFO "%s, Region monitoring, reset jvm_region_swap_out_counter[] to 0 \n", __func__);
 
 		return 0;
-	}// end of if.
-	#endif
+	} // end of if.
+#endif
 
-
-  printk(KERN_ERR "%s, [0x%llx, 0x%llx) exceed the swap out array range [0x%llx, 0x%llx),  ", __func__, 
-																													(u64)start_vaddr, 
-																													(u64)(start_vaddr+bytes_len),
-																													(u64)SWAP_OUT_MONITOR_VADDR_START,  
-																													(u64)(SWAP_OUT_MONITOR_VADDR_START+ SWAP_OUT_MONITOR_ARRAY_LEN *(1<<SWAP_OUT_MONITOR_UNIT_LEN_LOG) ));
+	printk(KERN_ERR "%s, [0x%llx, 0x%llx) exceed the swap out array range [0x%llx, 0x%llx),  ", __func__,
+	       (u64)start_vaddr, (u64)(start_vaddr + bytes_len), (u64)SWAP_OUT_MONITOR_VADDR_START,
+	       (u64)(SWAP_OUT_MONITOR_VADDR_START + SWAP_OUT_MONITOR_ARRAY_LEN * (1 << SWAP_OUT_MONITOR_UNIT_LEN_LOG)));
 	return -1;
 }
-
 
 /**
  * Semeru CPU : get the swapped out pages number.
@@ -192,6 +186,7 @@ asmlinkage u64 sys_num_of_swap_out_pages(u64 start_vaddr, u64 bytes_len){
 asmlinkage int sys_num_of_on_demand_swapin(void){
 
 	printk(KERN_INFO"%s, on-demand swapin page number : %d \n", __func__, get_on_demand_swapin_number());
+	printk(KERN_INFO"%s, prefetch swapin page number : %d \n", __func__, get_prefetch_swapin_number());
 	printk(KERN_INFO"%s, hit on swap cache page number : %d \n\n", __func__, get_hit_on_swap_cache_number());
 	
 	return get_on_demand_swapin_number();

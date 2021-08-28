@@ -1736,21 +1736,7 @@ jint G1CollectedHeap::initialize() {
     // Added by Chenxi.
     g1_rs = heap_rs.last_part(reserved_for_rdma_data);   
 
-    _recv_mem_server_cset 	= new(MEMORY_SERVER_CSET_SIZE, rdma_rs.base() + MEMORY_SERVER_CSET_OFFSET) received_memory_server_cset();
-	  _cpu_server_flags				=	new(FLAGS_OF_CPU_SERVER_STATE_SIZE, rdma_rs.base() + FLAGS_OF_CPU_SERVER_STATE_OFFSET) flags_of_cpu_server_state();
-    _mem_server_flags       =	new(FLAGS_OF_MEM_SERVER_STATE_SIZE, rdma_rs.base() + FLAGS_OF_MEM_SERVER_STATE_OFFSET) flags_of_mem_server_state();
-
-		#ifdef ASSERT
-		log_debug(semeru, alloc)("%s, Meta data allocation Start\n", __func__);
-		log_debug(semeru, alloc)("	received_memory_server_cset 0x%lx, flexible array 0x%lx",  
-																							(size_t)_recv_mem_server_cset, (size_t)_recv_mem_server_cset->_region_cset  );
-		log_debug(semeru, alloc)("	flags_of_cpu_server_state  0x%lx, flexible array 0x%lx",  
-																							(size_t)_cpu_server_flags, (size_t)0 );
-    log_debug(semeru, alloc)("	flags_of_mem_server_state  0x%lx, flexible array 0x%lx",  
-																							(size_t)_mem_server_flags, (size_t)0 );
-
-		log_debug(semeru, alloc)("%s, Meta data allocation End \n", __func__);
-		#endif
+    initialize_cpu_mem_comm_structs(&rdma_rs);
 
 	  // Debug
 	  // Do padding for the first GB meta data space. Until the start of alive_bitmap.
@@ -1766,6 +1752,9 @@ jint G1CollectedHeap::initialize() {
 
     initialize_reserved_region((HeapWord*)heap_rs.base(), 
                                               (HeapWord*)(heap_rs.base() + heap_rs.size()));
+
+    // reset the cpu-mem server communication meta data
+    initialize_cpu_mem_comm_structs((ReservedSpace*)NULL);
 
   }
   
@@ -3028,16 +3017,359 @@ int G1CollectedHeap::compare_meta_st(const AddrPair a, const AddrPair b) {
   }
 }
 
+
+
+/**
+ * The Default Young GC 
+ */
 bool
 G1CollectedHeap::do_collection_pause_at_safepoint(double target_pause_time_ms) {
+  assert_at_safepoint_on_vm_thread();
+  guarantee(!is_gc_active(), "collection is not reentrant");
 
+  if (GCLocker::check_active_before_gc()) {
+    return false;
+  }
+
+  _gc_timer_stw->register_gc_start();
+
+  GCIdMark gc_id_mark;
+  _gc_tracer_stw->report_gc_start(gc_cause(), _gc_timer_stw->gc_start());
+
+  SvcGCMarker sgcm(SvcGCMarker::MINOR);
+  ResourceMark rm;
+
+  g1_policy()->note_gc_start();
+
+  wait_for_root_region_scanning();
+
+  print_heap_before_gc();
+  print_heap_regions();
+  trace_heap_before_gc(_gc_tracer_stw);
+
+  _verifier->verify_region_sets_optional();
+  _verifier->verify_dirty_young_regions();
+
+  // We should not be doing initial mark unless the conc mark thread is running
+  if (!_cm_thread->should_terminate()) {
+    // This call will decide whether this pause is an initial-mark
+    // pause. If it is, in_initial_mark_gc() will return true
+    // for the duration of this pause.
+    g1_policy()->decide_on_conc_mark_initiation();
+  }
+
+  // We do not allow initial-mark to be piggy-backed on a mixed GC.
+  assert(!collector_state()->in_initial_mark_gc() ||
+          collector_state()->in_young_only_phase(), "sanity");
+
+  // We also do not allow mixed GCs during marking.
+  assert(!collector_state()->mark_or_rebuild_in_progress() || collector_state()->in_young_only_phase(), "sanity");
+
+  // Record whether this pause is an initial mark. When the current
+  // thread has completed its logging output and it's safe to signal
+  // the CM thread, the flag's value in the policy has been reset.
+  bool should_start_conc_mark = collector_state()->in_initial_mark_gc();
+
+  // Inner scope for scope based logging, timers, and stats collection
+  {
+    EvacuationInfo evacuation_info;
+
+    if (collector_state()->in_initial_mark_gc()) {
+      // We are about to start a marking cycle, so we increment the
+      // full collection counter.
+      increment_old_marking_cycles_started();
+      _cm->gc_tracer_cm()->set_gc_cause(gc_cause());
+    }
+
+    _gc_tracer_stw->report_yc_type(collector_state()->yc_type());
+
+    GCTraceCPUTime tcpu;
+
+    G1HeapVerifier::G1VerifyType verify_type;
+    FormatBuffer<> gc_string("Pause Young ");
+    if (collector_state()->in_initial_mark_gc()) {
+      gc_string.append("(Concurrent Start)");
+      verify_type = G1HeapVerifier::G1VerifyConcurrentStart;
+    } else if (collector_state()->in_young_only_phase()) {
+      if (collector_state()->in_young_gc_before_mixed()) {
+        gc_string.append("(Prepare Mixed)");
+      } else {
+        gc_string.append("(Normal)");
+      }
+      verify_type = G1HeapVerifier::G1VerifyYoungNormal;
+    } else {
+      gc_string.append("(Mixed)");
+      verify_type = G1HeapVerifier::G1VerifyMixed;
+    }
+    GCTraceTime(Info, gc) tm(gc_string, NULL, gc_cause(), true);
+
+    uint active_workers = WorkerPolicy::calc_active_workers(workers()->total_workers(),
+                                                            workers()->active_workers(),
+                                                            Threads::number_of_non_daemon_threads());
+    active_workers = workers()->update_active_workers(active_workers);
+    log_info(gc,task)("Using %u workers of %u for evacuation", active_workers, workers()->total_workers());
+
+    G1MonitoringScope ms(g1mm(),
+                         false /* full_gc */,
+                         collector_state()->yc_type() == Mixed /* all_memory_pools_affected */);
+
+    G1HeapTransition heap_transition(this);
+    size_t heap_used_bytes_before_gc = used();
+
+    // Don't dynamically change the number of GC threads this early.  A value of
+    // 0 is used to indicate serial work.  When parallel work is done,
+    // it will be set.
+
+    { // Call to jvmpi::post_class_unload_events must occur outside of active GC
+      IsGCActiveMark x;
+
+      gc_prologue(false);
+
+      if (VerifyRememberedSets) {
+        log_info(gc, verify)("[Verifying RemSets before GC]");
+        VerifyRegionRemSetClosure v_cl;
+        heap_region_iterate(&v_cl);
+      }
+
+      _verifier->verify_before_gc(verify_type);
+
+      _verifier->check_bitmaps("GC Start");
+
+#if COMPILER2_OR_JVMCI
+      DerivedPointerTable::clear();
+#endif
+
+      // Please see comment in g1CollectedHeap.hpp and
+      // G1CollectedHeap::ref_processing_init() to see how
+      // reference processing currently works in G1.
+
+      // Enable discovery in the STW reference processor
+      _ref_processor_stw->enable_discovery();
+
+      {
+        // We want to temporarily turn off discovery by the
+        // CM ref processor, if necessary, and turn it back on
+        // on again later if we do. Using a scoped
+        // NoRefDiscovery object will do this.
+        NoRefDiscovery no_cm_discovery(_ref_processor_cm);
+
+        // Forget the current alloc region (we might even choose it to be part
+        // of the collection set!).
+        _allocator->release_mutator_alloc_region();
+
+        // This timing is only used by the ergonomics to handle our pause target.
+        // It is unclear why this should not include the full pause. We will
+        // investigate this in CR 7178365.
+        //
+        // Preserving the old comment here if that helps the investigation:
+        //
+        // The elapsed time induced by the start time below deliberately elides
+        // the possible verification above.
+        double sample_start_time_sec = os::elapsedTime();
+
+        g1_policy()->record_collection_pause_start(sample_start_time_sec);
+
+        if (collector_state()->in_initial_mark_gc()) {
+          concurrent_mark()->pre_initial_mark();
+        }
+
+        g1_policy()->finalize_collection_set(target_pause_time_ms, &_survivor);
+
+        evacuation_info.set_collectionset_regions(collection_set()->region_length());
+
+        register_humongous_regions_with_cset();
+
+        assert(_verifier->check_cset_fast_test(), "Inconsistency in the InCSetState table.");
+
+        // We call this after finalize_cset() to
+        // ensure that the CSet has been finalized.
+        _cm->verify_no_cset_oops();
+
+        if (_hr_printer.is_active()) {
+          G1PrintCollectionSetClosure cl(&_hr_printer);
+          _collection_set.iterate(&cl);
+        }
+
+        // Initialize the GC alloc regions.
+        _allocator->init_gc_alloc_regions(evacuation_info);
+
+        G1ParScanThreadStateSet per_thread_states(this,
+                                                  workers()->active_workers(),
+                                                  collection_set()->young_region_length(),
+                                                  collection_set()->optional_region_length());
+        pre_evacuate_collection_set();
+
+        // Actually do the work...
+        evacuate_collection_set(&per_thread_states);
+        evacuate_optional_collection_set(&per_thread_states);
+
+        post_evacuate_collection_set(evacuation_info, &per_thread_states);
+
+        const size_t* surviving_young_words = per_thread_states.surviving_young_words();
+        free_collection_set(&_collection_set, evacuation_info, surviving_young_words);
+
+        eagerly_reclaim_humongous_regions();
+
+        record_obj_copy_mem_stats();
+        _survivor_evac_stats.adjust_desired_plab_sz();
+        _old_evac_stats.adjust_desired_plab_sz();
+
+        double start = os::elapsedTime();
+        start_new_collection_set();
+        g1_policy()->phase_times()->record_start_new_cset_time_ms((os::elapsedTime() - start) * 1000.0);
+
+        if (evacuation_failed()) {
+          double recalculate_used_start = os::elapsedTime();
+          set_used(recalculate_used());
+          g1_policy()->phase_times()->record_evac_fail_recalc_used_time((os::elapsedTime() - recalculate_used_start) * 1000.0);
+
+          if (_archive_allocator != NULL) {
+            _archive_allocator->clear_used();
+          }
+          for (uint i = 0; i < ParallelGCThreads; i++) {
+            if (_evacuation_failed_info_array[i].has_failed()) {
+              _gc_tracer_stw->report_evacuation_failed(_evacuation_failed_info_array[i]);
+            }
+          }
+        } else {
+          // The "used" of the the collection set have already been subtracted
+          // when they were freed.  Add in the bytes evacuated.
+          increase_used(g1_policy()->bytes_copied_during_gc());
+        }
+
+        if (collector_state()->in_initial_mark_gc()) {
+          // We have to do this before we notify the CM threads that
+          // they can start working to make sure that all the
+          // appropriate initialization is done on the CM object.
+          concurrent_mark()->post_initial_mark();
+          // Note that we don't actually trigger the CM thread at
+          // this point. We do that later when we're sure that
+          // the current thread has completed its logging output.
+        }
+
+        allocate_dummy_regions();
+
+        _allocator->init_mutator_alloc_region();
+
+        {
+          size_t expand_bytes = _heap_sizing_policy->expansion_amount();
+          if (expand_bytes > 0) {
+            size_t bytes_before = capacity();
+            // No need for an ergo logging here,
+            // expansion_amount() does this when it returns a value > 0.
+            double expand_ms;
+            if (!expand(expand_bytes, _workers, &expand_ms)) {
+              // We failed to expand the heap. Cannot do anything about it.
+            }
+            g1_policy()->phase_times()->record_expand_heap_time(expand_ms);
+          }
+        }
+
+        // We redo the verification but now wrt to the new CSet which
+        // has just got initialized after the previous CSet was freed.
+        _cm->verify_no_cset_oops();
+
+        // This timing is only used by the ergonomics to handle our pause target.
+        // It is unclear why this should not include the full pause. We will
+        // investigate this in CR 7178365.
+        double sample_end_time_sec = os::elapsedTime();
+        double pause_time_ms = (sample_end_time_sec - sample_start_time_sec) * MILLIUNITS;
+        size_t total_cards_scanned = g1_policy()->phase_times()->sum_thread_work_items(G1GCPhaseTimes::ScanRS, G1GCPhaseTimes::ScanRSScannedCards);
+        g1_policy()->record_collection_pause_end(pause_time_ms, total_cards_scanned, heap_used_bytes_before_gc);
+
+        evacuation_info.set_collectionset_used_before(collection_set()->bytes_used_before());
+        evacuation_info.set_bytes_copied(g1_policy()->bytes_copied_during_gc());
+
+        if (VerifyRememberedSets) {
+          log_info(gc, verify)("[Verifying RemSets after GC]");
+          VerifyRegionRemSetClosure v_cl;
+          heap_region_iterate(&v_cl);
+        }
+
+        _verifier->verify_after_gc(verify_type);
+        _verifier->check_bitmaps("GC End");
+
+        assert(!_ref_processor_stw->discovery_enabled(), "Postcondition");
+        _ref_processor_stw->verify_no_references_recorded();
+
+        // CM reference discovery will be re-enabled if necessary.
+      }
+
+#ifdef TRACESPINNING
+      ParallelTaskTerminator::print_termination_counts();
+#endif
+
+      gc_epilogue(false);
+    }
+
+    // Print the remainder of the GC log output.
+    if (evacuation_failed()) {
+      log_info(gc)("To-space exhausted");
+    }
+
+    g1_policy()->print_phases();
+    heap_transition.print();
+
+    // It is not yet to safe to tell the concurrent mark to
+    // start as we have some optional output below. We don't want the
+    // output from the concurrent mark thread interfering with this
+    // logging output either.
+
+    _hrm->verify_optional();
+    _verifier->verify_region_sets_optional();
+
+    TASKQUEUE_STATS_ONLY(print_taskqueue_stats());
+    TASKQUEUE_STATS_ONLY(reset_taskqueue_stats());
+
+    print_heap_after_gc();
+    print_heap_regions();
+    trace_heap_after_gc(_gc_tracer_stw);
+
+    // We must call G1MonitoringSupport::update_sizes() in the same scoping level
+    // as an active TraceMemoryManagerStats object (i.e. before the destructor for the
+    // TraceMemoryManagerStats is called) so that the G1 memory pools are updated
+    // before any GC notifications are raised.
+    g1mm()->update_sizes();
+
+    _gc_tracer_stw->report_evacuation_info(&evacuation_info);
+    _gc_tracer_stw->report_tenuring_threshold(_g1_policy->tenuring_threshold());
+    _gc_timer_stw->register_gc_end();
+    _gc_tracer_stw->report_gc_end(_gc_timer_stw->gc_end(), _gc_timer_stw->time_partitions());
+  }
+  // It should now be safe to tell the concurrent mark thread to start
+  // without its logging output interfering with the logging output
+  // that came from the pause.
+
+  if (should_start_conc_mark) {
+    // CAUTION: after the doConcurrentMark() call below,
+    // the concurrent marking thread(s) could be running
+    // concurrently with us. Make sure that anything after
+    // this point does not assume that we are the only GC thread
+    // running. Note: of course, the actual marking work will
+    // not start until the safepoint itself is released in
+    // SuspendibleThreadSet::desynchronize().
+    do_concurrent_mark();
+  }
+
+  return true;
+}
+
+
+
+
+/**
+ * Semeru CPU Server Stop-the-wolrd GC, CSSC
+ *  
+ */
+bool
+G1CollectedHeap::semeru_do_collection_pause_at_safepoint(double target_pause_time_ms) {
 
   double read_time_st = os::elapsedTime();
           
   cpu_server_flags()->set_cpu_server_in_stw();
   log_debug(semeru,mem_trace)("%s, Update CSet to memory server. \n", __func__);
   send_cpu_server_flags_to_mem_server();
-
+  
 
   uint len = _hrm->max_length();
   for (uint i = 0; i < len; i++) {
@@ -3224,9 +3556,7 @@ G1CollectedHeap::do_collection_pause_at_safepoint(double target_pause_time_ms) {
 
         //mhr: modify
         //mhr: reimplement the whole collection set choosing part
-        g1_policy()->finalize_collection_set(&_survivor);
-        //g1_policy()->finalize_collection_set(target_pause_time_ms, &_survivor);
-
+        g1_policy()->semeru_finalize_collection_set(&_survivor);
 
         //Update meta klass data to each memory servers
         bool update_klass = false;
@@ -4384,6 +4714,8 @@ void G1CollectedHeap::evacuate_collection_set(G1ParScanThreadStateSet* per_threa
 
       // Update cset to memory server, if non-empty
       if(num_mem_cset){
+        
+        //Comment this to disable memory server CT
         update_cset_to_mem_server(mem_id);
         log_info(semeru,rdma)("%s, write %lx regions cset to memory server[%lu] ",__func__, num_mem_cset, mem_id);
       }
@@ -5721,9 +6053,10 @@ void G1CollectedHeap::retire_mutator_alloc_region(HeapRegion* alloc_region,
   assert_heap_locked_or_at_safepoint(true /* should_be_vm_thread */);
   assert(alloc_region->is_eden(), "all mutator alloc regions should be eden");
 
-  //mhr: modify
-  //mhr: should not add eden region here.
-  // collection_set()->add_eden_region(alloc_region);
+  //  Semeru doesn't update CSet here.
+  if(SemeruEnableMemPool == false){
+    collection_set()->add_eden_region(alloc_region);
+  }
 
   increase_used(allocated_bytes);
   _hr_printer.retire(alloc_region);

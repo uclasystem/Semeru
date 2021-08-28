@@ -378,13 +378,15 @@ private :
 
 
 public :
-	// [?] a flexible array, points the memory just behind this instance.
+	// [x] a flexible array, points the memory just behind this instance.
 	// The size of current instance should be limited within 4K, 
 	// The array size should be limited by MEM_SERVER_CSET_BUFFER_SIZE.
-	volatile uint	_region_cset[NUM_OF_MEMORY_SERVER][128];    // 	within 4KB, support 64GB per memory server. e.g. 512M per Region
+  // 	within 4KB, support 64GB per memory server. e.g. 512M per Region
+	volatile uint	_region_cset[NUM_OF_MEMORY_SERVER][128];    
 
-
-
+  //
+  // Do NOT declare any variables behind _regions_cset[][] !!
+  //
 	
 	received_memory_server_cset();
 	
@@ -593,7 +595,7 @@ public :
 
     assert(sizeof(uint32_t) == granularity, "wrong granularity. ");
 
-    memset(ptr, byte_size/granularity, 0);
+    memset(ptr, 0, byte_size/granularity);
     
   }
 

@@ -130,7 +130,11 @@ void VM_G1CollectForAllocation::doit() {
   }
 
   // Try a partial collection of some kind.
-  _gc_succeeded = g1h->do_collection_pause_at_safepoint(_target_pause_time_ms);
+  if(SemeruEnableMemPool && UseCompressedOops==false){
+     _gc_succeeded = g1h->semeru_do_collection_pause_at_safepoint(_target_pause_time_ms);
+  }else{
+    _gc_succeeded = g1h->do_collection_pause_at_safepoint(_target_pause_time_ms);
+  }
 
   if (_gc_succeeded) {
     if (_word_size > 0) {

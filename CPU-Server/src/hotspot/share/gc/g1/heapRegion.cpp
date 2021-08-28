@@ -916,6 +916,9 @@ void G1ContiguousSpace::initialize(MemRegion mr, bool clear_space, bool mangle_s
 /**
  * get the memory server id for the region.
  * 
+ * !! Fix Me !! 
+ * To support multiple memory servers.
+ * 
  */
 int HeapRegion::region_to_memory_server_mapping(){
   int target_mem_id = -1;

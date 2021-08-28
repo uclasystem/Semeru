@@ -341,11 +341,11 @@
 332	common	statx			sys_statx
 
 # Semeru
-333 common	do_semeru_rdma_ops			sys_do_semeru_rdma_ops
-334 common	test_syscall    sys_test_syscall
+333 common  do_semeru_rdma_ops		sys_do_semeru_rdma_ops
+334 common  test_syscall                sys_test_syscall
 335 common  swap_stat_reset_and_check   sys_swap_stat_reset_and_check
-336 common  num_of_swap_out_pages   sys_num_of_swap_out_pages
-337 common  num_of_on_demand_swapin   sys_num_of_on_demand_swapin
+336 common  num_of_swap_out_pages       sys_num_of_swap_out_pages
+337 common  num_of_on_demand_swapin     sys_num_of_on_demand_swapin
 
 #
 # x32-specific system call numbers start at 512 to avoid cache impact

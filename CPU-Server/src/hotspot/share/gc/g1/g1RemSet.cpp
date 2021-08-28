@@ -781,17 +781,7 @@ bool G1ScanRSForRegionClosureMemUpdate::do_heap_region(HeapRegion* r) {
     G1ScanObjsDuringScanRSClosureOptional obj_cl(_g1h, _pss);
     G1ScanRSForOptionalClosureNew scan_opt_cl(&obj_cl);
     _pss->oops_into_optional_region(r)->oops_do(&scan_opt_cl, root_cls->raw_strong_oops());
-    // if(r->used() == 0) {
-    //   _g1h->clear_in_cset(r);
-    //   _g1h->collection_set()->add_old_region(r);
-    //   _g1h->collection_set()->clear_optional_region(r);
-    // }
-    // else {
-    //   _g1h->old_set_add(r);
-    //   _g1h->clear_in_cset(r);
-    //   _g1h->collection_set()->clear_optional_region(r);
-    //   r->set_index_in_opt_cset(G1OptionalCSet::InvalidCSetIndex);
-    // }
+
   }
   
   return false;
